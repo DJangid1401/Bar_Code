@@ -20,7 +20,7 @@ export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
         scanner.clear();
         onScanSuccess(decodedText);
       },
-      (error) => {}
+      () => {}
     );
 
     return () => {

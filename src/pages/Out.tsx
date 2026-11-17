@@ -4,7 +4,7 @@ import QRScanner from '../components/QRScanner';
 import { ArrowUpFromLine, QrCode, MinusCircle } from 'lucide-react';
 
 export default function Out() {
-  const { items, scanOut } = useStore();
+  const { scanOut } = useStore();
   const [showScanner, setShowScanner] = useState(false);
   const [barcode, setBarcode] = useState('');
 
