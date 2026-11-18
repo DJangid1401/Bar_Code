@@ -86,6 +86,13 @@ function normalizeUnit(unit) {
   return 'PCS';
 }
 
+function resolveStockValue(rawStockCell, totalInVal, totalOutVal) {
+  if (rawStockCell === '' || rawStockCell === null || rawStockCell === undefined) {
+    return Math.max(0, (Number(totalInVal) || 0) - (Number(totalOutVal) || 0));
+  }
+  return Math.max(0, Number(rawStockCell) || 0);
+}
+
 function readAllData() {
   var sheets = getOrCreateSheets();
   var stockValues = sheets.stockSheet.getDataRange().getValues();
@@ -96,17 +103,20 @@ function readAllData() {
     var row = stockValues[i];
     var barcode = String(row[0] || '').trim();
     if (!barcode) continue;
+    var totalInVal = Number(row[4]) || 0;
+    var totalOutVal = Number(row[5]) || 0;
+    var stockVal = resolveStockValue(row[6], totalInVal, totalOutVal);
     items.push({
       barcode: barcode,
       name: String(row[1] || '').trim(),
       size: String(row[2] || '').trim(),
       color: String(row[3] || '').trim(),
-      totalIn: Number(row[4]) || 0,
-      totalOut: Number(row[5]) || 0,
-      stock: Number(row[6]) || 0,
+      totalIn: totalInVal,
+      totalOut: totalOutVal,
+      stock: stockVal,
       unit: normalizeUnit(row[7]),
       updatedBy: String(row[8] || '').trim(),
-      updatedAt: Number(row[9]) || Date.now(),
+      updatedAt: Number(row[9]) || 0,
     });
   }
 
@@ -212,9 +222,11 @@ function doPost(e) {
       var savedItem;
       if (foundRowIndex !== -1) {
         var existingRow = stockData[foundRowIndex - 1];
-        var newTotalIn = (Number(existingRow[4]) || 0) + qty;
+        var existingTotalIn = Number(existingRow[4]) || 0;
         var existingTotalOut = Number(existingRow[5]) || 0;
-        var newStock = (Number(existingRow[6]) || 0) + qty;
+        var existingStock = resolveStockValue(existingRow[6], existingTotalIn, existingTotalOut);
+        var newTotalIn = existingTotalIn + qty;
+        var newStock = existingStock + qty;
         var resolvedCode = String(existingRow[0]).trim();
         var resolvedName = name || String(existingRow[1]).trim();
         var resolvedSize = size || String(existingRow[2] || '').trim();
@@ -329,7 +341,9 @@ function doPost(e) {
       }
 
       var currRow = sData[rowIdx - 1];
-      var currStock = Number(currRow[6]) || 0;
+      var currTotalIn = Number(currRow[4]) || 0;
+      var currTotalOut = Number(currRow[5]) || 0;
+      var currStock = resolveStockValue(currRow[6], currTotalIn, currTotalOut);
       var currUnit = normalizeUnit(currRow[7]);
       var currName = String(currRow[1] || '').trim();
 
@@ -426,9 +440,11 @@ function doPost(e) {
         if (codeToRowIndex[lowerCode]) {
           var targetRow = codeToRowIndex[lowerCode];
           var rowArr = stockSheet.getRange(targetRow, 1, 1, STOCK_HEADERS.length).getValues()[0];
-          var updIn = (Number(rowArr[4]) || 0) + eQty;
+          var prevIn = Number(rowArr[4]) || 0;
           var updOut = Number(rowArr[5]) || 0;
-          var updStock = (Number(rowArr[6]) || 0) + eQty;
+          var prevStock = resolveStockValue(rowArr[6], prevIn, updOut);
+          var updIn = prevIn + eQty;
+          var updStock = prevStock + eQty;
           stockSheet
             .getRange(targetRow, 1, 1, STOCK_HEADERS.length)
             .setValues([

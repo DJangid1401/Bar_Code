@@ -76,13 +76,6 @@ export default function Dashboard() {
     .filter(i => normalizeUnit(i.unit) === 'PAC')
     .reduce((acc, item) => acc + item.stock, 0);
 
-  const totalIn = logs
-    .filter(l => l.type === 'IN')
-    .reduce((acc, l) => acc + (l.qty || 1), 0);
-  const totalOut = logs
-    .filter(l => l.type === 'OUT')
-    .reduce((acc, l) => acc + (l.qty || 1), 0);
-
   // Per-product IN / OUT / Remaining flow list
   const itemFlowList = useMemo(() => {
     const inMap = new Map<string, number>();
@@ -108,6 +101,18 @@ export default function Dashboard() {
       };
     });
   }, [items, logs]);
+
+  const totalInFromItems = itemFlowList.reduce((acc, i) => acc + i.computedIn, 0);
+  const totalInFromLogs = logs
+    .filter(l => l.type === 'IN')
+    .reduce((acc, l) => acc + (l.qty || 1), 0);
+  const totalIn = Math.max(totalInFromItems, totalInFromLogs);
+
+  const totalOutFromItems = itemFlowList.reduce((acc, i) => acc + i.computedOut, 0);
+  const totalOutFromLogs = logs
+    .filter(l => l.type === 'OUT')
+    .reduce((acc, l) => acc + (l.qty || 1), 0);
+  const totalOut = Math.max(totalOutFromItems, totalOutFromLogs);
 
   const filteredFlowItems = useMemo(() => {
     switch (filter) {

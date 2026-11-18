@@ -64,17 +64,30 @@ export function isGoogleSheetConfigured(): boolean {
 }
 
 function normalizeItem(raw: Partial<SheetStockItem>): SheetStockItem {
+  const totalIn = Number(raw.totalIn) || 0;
+  const totalOut = Number(raw.totalOut) || 0;
+  const rawStock = raw.stock;
+  let stock = Number(rawStock) || 0;
+
+  // If Remaining Stock cell was left blank on manually pasted Google Sheet rows, compute Total IN - Total OUT
+  if (
+    (rawStock === undefined || rawStock === null || (stock === 0 && !raw.updatedBy)) &&
+    totalIn > totalOut
+  ) {
+    stock = Math.max(0, totalIn - totalOut);
+  }
+
   return {
     barcode: String(raw.barcode || '').trim(),
     name: String(raw.name || '').trim(),
     size: String(raw.size || '').trim(),
     color: String(raw.color || '').trim(),
-    totalIn: Number(raw.totalIn) || 0,
-    totalOut: Number(raw.totalOut) || 0,
-    stock: Number(raw.stock) || 0,
+    totalIn,
+    totalOut,
+    stock,
     unit: normalizeUnit(raw.unit),
     updatedBy: String(raw.updatedBy || '').trim(),
-    updatedAt: Number(raw.updatedAt) || Date.now(),
+    updatedAt: Number(raw.updatedAt) || 0,
   };
 }
 
