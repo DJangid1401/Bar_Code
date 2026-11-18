@@ -116,7 +116,7 @@ export function parseScannedQR(decodedText: string): ParsedQR {
 export async function generateQRDataUrl(item: QRItemDetails): Promise<string> {
   const payload = buildQRPayload(item);
   return QRCode.toDataURL(payload, {
-    width: 240,
+    width: 354,
     margin: 0,
     errorCorrectionLevel: 'M',
     color: {

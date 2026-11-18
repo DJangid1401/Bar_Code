@@ -102,19 +102,19 @@ export default function QRLabelModal({
               font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
               background: #fff;
               color: #000;
-              padding: 12px;
+              padding: 4mm;
             }
             .grid {
               display: flex;
               flex-wrap: wrap;
-              gap: 8px;
+              gap: 3mm;
               align-items: flex-start;
             }
             .label-card {
-              border: 1.5px dashed #334155;
-              border-radius: 6px;
-              padding: 4px;
-              width: 156px;
+              border: 0.4mm dashed #334155;
+              border-radius: 1.5mm;
+              padding: 2mm;
+              width: 34mm;
               text-align: center;
               page-break-inside: avoid;
               break-inside: avoid;
@@ -124,29 +124,29 @@ export default function QRLabelModal({
               justify-content: center;
             }
             .qr-img {
-              width: 146px;
-              height: 146px;
+              width: 30mm;
+              height: 30mm;
               display: block;
-              margin: 0 auto 3px auto;
+              margin: 0 auto 1.5mm auto;
             }
             .size-line {
-              font-size: 12px;
+              font-size: 8.5pt;
               font-weight: 700;
               color: #0f172a;
               line-height: 1.15;
-              margin-bottom: 1px;
+              margin-bottom: 0.5mm;
               word-break: break-word;
             }
             .color-line {
-              font-size: 12px;
+              font-size: 8.5pt;
               font-weight: 700;
               color: #1e293b;
               line-height: 1.15;
               word-break: break-word;
             }
             @media print {
-              body { padding: 4mm; }
-              .grid { gap: 8px; }
+              body { padding: 3mm; }
+              .grid { gap: 2.5mm; }
             }
           </style>
         </head>
@@ -167,10 +167,10 @@ export default function QRLabelModal({
   };
 
   const handleDownloadSingle = (label: GeneratedLabel) => {
-    // Draw a tight sticker image with minimal left/right/bottom margin
+    // 30mm x 30mm QR at 300 DPI = 354 x 354 px
     const canvas = document.createElement('canvas');
-    const width = 256;
-    const height = 304;
+    const width = 380;
+    const height = 435;
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
@@ -185,25 +185,25 @@ export default function QRLabelModal({
 
     const img = new Image();
     img.onload = () => {
-      ctx.drawImage(img, 8, 8, 240, 240);
+      ctx.drawImage(img, 13, 12, 354, 354);
 
       ctx.fillStyle = '#0f172a';
       ctx.textAlign = 'center';
 
-      let y = 266;
+      let y = 392;
       if (label.item.size) {
-        ctx.font = 'bold 16px sans-serif';
+        ctx.font = 'bold 22px sans-serif';
         ctx.fillText(`Size: ${label.item.size}`, width / 2, y);
-        y += 22;
+        y += 28;
       }
 
       if (label.item.color) {
-        ctx.font = 'bold 16px sans-serif';
+        ctx.font = 'bold 22px sans-serif';
         ctx.fillText(`Color: ${label.item.color}`, width / 2, y);
       }
 
       const link = document.createElement('a');
-      link.download = `QR_${label.item.barcode}.png`;
+      link.download = `QR_30mm_${label.item.barcode}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
     };
@@ -261,7 +261,7 @@ export default function QRLabelModal({
               className="w-20 border border-slate-300 rounded-lg px-2.5 py-1 text-center font-bold focus:outline-none focus:border-blue-500"
             />
             <span className="text-xs text-slate-400">
-              (Total {labels.length * copiesPerItem} labels)
+              (Total {labels.length * copiesPerItem} labels &bull; QR: 30mm &times; 30mm)
             </span>
           </div>
 
@@ -287,23 +287,23 @@ export default function QRLabelModal({
               {labels.map(label => (
                 <div
                   key={label.item.barcode}
-                  className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-2 w-[176px] flex flex-col items-center text-center shadow-xs relative group"
+                  className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-2 w-[142px] flex flex-col items-center text-center shadow-xs relative group"
                 >
                   <img
                     src={label.dataUrl}
                     alt="QR Code"
-                    className="w-40 h-40 object-contain mb-1"
+                    className="w-[114px] h-[114px] object-contain mb-1"
                   />
                   {/* Only Size & Color Shown Directly Below QR */}
                   {(label.item.size || label.item.color) && (
                     <div className="w-full pt-0.5 space-y-0.5">
                       {label.item.size && (
-                        <p className="font-bold text-slate-800 text-sm leading-tight">
+                        <p className="font-bold text-slate-800 text-xs leading-tight">
                           Size: {label.item.size}
                         </p>
                       )}
                       {label.item.color && (
-                        <p className="font-bold text-slate-700 text-sm leading-tight">
+                        <p className="font-bold text-slate-700 text-xs leading-tight">
                           Color: {label.item.color}
                         </p>
                       )}
