@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { AllowedUnit, normalizeUnit } from './utils/qrHelper';
 
 export type Transaction = {
   id: string;
@@ -9,7 +10,7 @@ export type Transaction = {
   size?: string;
   color?: string;
   qty: number;
-  unit?: string;
+  unit?: AllowedUnit;
   source?: 'SCAN' | 'MANUAL' | 'EXCEL_IMPORT';
   timestamp: number;
 };
@@ -20,23 +21,9 @@ export type StockItem = {
   size: string;
   color: string;
   stock: number;
-  unit: string;
+  unit: AllowedUnit;
   createdAt?: number;
   updatedAt?: number;
-};
-
-export const generateUniqueCode = (existingBarcodes?: string[]): string => {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  const existingSet = new Set((existingBarcodes || []).map(b => b.toUpperCase()));
-  do {
-    let rand = '';
-    for (let i = 0; i < 6; i++) {
-      rand += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    code = `PRD-${rand}`;
-  } while (existingSet.has(code));
-  return code;
 };
 
 export type ScanInPayload = {
@@ -60,21 +47,21 @@ interface AppState {
   scanIn: (
     payloadOrBarcode: ScanInPayload | string,
     fallbackName?: string
-  ) => { success: boolean; message: string };
+  ) => { success: boolean; message: string; item?: StockItem };
   scanOut: (
     payloadOrBarcode: ScanOutPayload | string,
     fallbackQty?: number
   ) => { success: boolean; message: string };
   bulkStockIn: (
     entries: Array<{
-      barcode?: string;
+      barcode: string;
       name: string;
       size?: string;
       color?: string;
       qty: number;
       unit?: string;
     }>
-  ) => { count: number; message: string };
+  ) => { count: number; message: string; importedItems: StockItem[] };
   updateItem: (
     barcode: string,
     updatedData: Partial<Omit<StockItem, 'barcode'>>
@@ -95,7 +82,7 @@ export const useStore = create<AppState>()(
         let qty = 1;
         let size = '';
         let color = '';
-        let unit = 'Pcs';
+        let unit: AllowedUnit = 'PCS';
         let source: 'SCAN' | 'MANUAL' | 'EXCEL_IMPORT' = 'MANUAL';
 
         if (typeof payloadOrBarcode === 'string') {
@@ -107,12 +94,12 @@ export const useStore = create<AppState>()(
           qty = Number(payloadOrBarcode.qty) > 0 ? Number(payloadOrBarcode.qty) : 1;
           size = (payloadOrBarcode.size || '').trim();
           color = (payloadOrBarcode.color || '').trim();
-          unit = (payloadOrBarcode.unit || 'Pcs').trim();
+          unit = normalizeUnit(payloadOrBarcode.unit);
           source = payloadOrBarcode.source || 'MANUAL';
         }
 
-        if (!barcode) return { success: false, message: 'Unique code / Barcode zaroori hai!' };
-        if (!name) return { success: false, message: 'Product Name zaroori hai!' };
+        if (!barcode) return { success: false, message: 'Manual Product Code / Unique Code dalna zaroori hai!' };
+        if (!name) return { success: false, message: 'Product Name dalna zaroori hai!' };
 
         const { items, logs } = get();
         const existing = items.find(
@@ -120,52 +107,54 @@ export const useStore = create<AppState>()(
         );
         const now = Date.now();
 
+        let savedItem: StockItem;
         let newItems: StockItem[];
         if (existing) {
+          savedItem = {
+            ...existing,
+            name: name || existing.name,
+            size: size || existing.size || '',
+            color: color || existing.color || '',
+            unit: normalizeUnit(unit || existing.unit),
+            stock: existing.stock + qty,
+            updatedAt: now,
+          };
           newItems = items.map(i =>
-            i.barcode.toLowerCase() === barcode.toLowerCase()
-              ? {
-                  ...i,
-                  name: name || i.name,
-                  size: size || i.size || '',
-                  color: color || i.color || '',
-                  unit: unit || i.unit || 'Pcs',
-                  stock: i.stock + qty,
-                  updatedAt: now,
-                }
-              : i
+            i.barcode.toLowerCase() === barcode.toLowerCase() ? savedItem : i
           );
         } else {
-          newItems = [
-            ...items,
-            {
-              barcode,
-              name,
-              size: size || '',
-              color: color || '',
-              stock: qty,
-              unit: unit || 'Pcs',
-              createdAt: now,
-              updatedAt: now,
-            },
-          ];
+          savedItem = {
+            barcode,
+            name,
+            size: size || '',
+            color: color || '',
+            stock: qty,
+            unit,
+            createdAt: now,
+            updatedAt: now,
+          };
+          newItems = [...items, savedItem];
         }
 
         const newLog: Transaction = {
           id: now.toString() + Math.random().toString(36).substring(2, 6),
           type: 'IN',
-          barcode,
-          name,
-          size: size || existing?.size || '',
-          color: color || existing?.color || '',
+          barcode: savedItem.barcode,
+          name: savedItem.name,
+          size: savedItem.size,
+          color: savedItem.color,
           qty,
-          unit: unit || existing?.unit || 'Pcs',
+          unit: savedItem.unit,
           source,
           timestamp: now,
         };
 
         set({ items: newItems, logs: [newLog, ...logs] });
-        return { success: true, message: `Success: +${qty} ${name} Stock IN Done!` };
+        return {
+          success: true,
+          message: `Success: +${qty} ${savedItem.unit} ${savedItem.name} Stock IN Done!`,
+          item: savedItem,
+        };
       },
 
       scanOut: (payloadOrBarcode, fallbackQty) => {
@@ -180,7 +169,7 @@ export const useStore = create<AppState>()(
           qty = Number(payloadOrBarcode.qty) > 0 ? Number(payloadOrBarcode.qty) : 1;
         }
 
-        if (!barcode) return { success: false, message: 'Barcode dalna zaroori hai!' };
+        if (!barcode) return { success: false, message: 'Product Code dalna zaroori hai!' };
 
         const { items, logs } = get();
         const existing = items.find(
@@ -190,17 +179,19 @@ export const useStore = create<AppState>()(
           return { success: false, message: 'Error: Ye item system mein nahi hai!' };
         }
 
+        const unit = normalizeUnit(existing.unit);
+
         if (existing.stock < qty) {
           return {
             success: false,
-            message: `Error: Stock kam hai! Available: ${existing.stock} ${existing.unit || 'Pcs'}, Requested: ${qty}`,
+            message: `Error: Stock kam hai! Available: ${existing.stock} ${unit}, Requested: ${qty}`,
           };
         }
 
         const now = Date.now();
         const newItems = items.map(i =>
           i.barcode.toLowerCase() === barcode.toLowerCase()
-            ? { ...i, stock: i.stock - qty, updatedAt: now }
+            ? { ...i, stock: i.stock - qty, unit, updatedAt: now }
             : i
         );
 
@@ -212,7 +203,7 @@ export const useStore = create<AppState>()(
           size: existing.size,
           color: existing.color,
           qty,
-          unit: existing.unit,
+          unit,
           source: 'MANUAL',
           timestamp: now,
         };
@@ -220,7 +211,7 @@ export const useStore = create<AppState>()(
         set({ items: newItems, logs: [newLog, ...logs] });
         return {
           success: true,
-          message: `Success: -${qty} ${existing.name} OUT ho gaya!`,
+          message: `Success: -${qty} ${unit} ${existing.name} OUT ho gaya!`,
         };
       },
 
@@ -228,42 +219,41 @@ export const useStore = create<AppState>()(
         const { items, logs } = get();
         const currentItems = [...items];
         const newLogs: Transaction[] = [];
+        const importedMap = new Map<string, StockItem>();
         const now = Date.now();
         let processedCount = 0;
 
         for (let idx = 0; idx < entries.length; idx++) {
           const entry = entries[idx];
+          const barcode = (entry.barcode || '').trim();
           const name = (entry.name || '').trim();
-          if (!name) continue;
+          // Strict manual code requirement: skip if barcode or name missing
+          if (!barcode || !name) continue;
 
           const qty = Number(entry.qty) > 0 ? Number(entry.qty) : 1;
           const size = (entry.size || '').trim();
           const color = (entry.color || '').trim();
-          const unit = (entry.unit || 'Pcs').trim();
-
-          let barcode = (entry.barcode || '').trim();
-          if (!barcode) {
-            const existingCodes = currentItems.map(i => i.barcode);
-            barcode = generateUniqueCode(existingCodes);
-          }
+          const unit = normalizeUnit(entry.unit);
 
           const existingIndex = currentItems.findIndex(
             i => i.barcode.toLowerCase() === barcode.toLowerCase()
           );
 
+          let savedItem: StockItem;
           if (existingIndex >= 0) {
             const existing = currentItems[existingIndex];
-            currentItems[existingIndex] = {
+            savedItem = {
               ...existing,
               name: name || existing.name,
               size: size || existing.size || '',
               color: color || existing.color || '',
-              unit: unit || existing.unit || 'Pcs',
+              unit: normalizeUnit(unit || existing.unit),
               stock: existing.stock + qty,
               updatedAt: now + idx,
             };
+            currentItems[existingIndex] = savedItem;
           } else {
-            currentItems.push({
+            savedItem = {
               barcode,
               name,
               size,
@@ -272,18 +262,21 @@ export const useStore = create<AppState>()(
               unit,
               createdAt: now + idx,
               updatedAt: now + idx,
-            });
+            };
+            currentItems.push(savedItem);
           }
+
+          importedMap.set(savedItem.barcode.toLowerCase(), savedItem);
 
           newLogs.push({
             id: (now + idx).toString() + Math.random().toString(36).substring(2, 6),
             type: 'IN',
-            barcode,
-            name,
-            size,
-            color,
+            barcode: savedItem.barcode,
+            name: savedItem.name,
+            size: savedItem.size,
+            color: savedItem.color,
             qty,
-            unit,
+            unit: savedItem.unit,
             source: 'EXCEL_IMPORT',
             timestamp: now + idx,
           });
@@ -294,7 +287,8 @@ export const useStore = create<AppState>()(
         set({ items: currentItems, logs: [...newLogs.reverse(), ...logs] });
         return {
           count: processedCount,
-          message: `Success: ${processedCount} items Excel/CSV se Stock IN ho gaye!`,
+          message: `Success: ${processedCount} items Excel/CSV se Stock IN ho gaye! QR codes ready hain.`,
+          importedItems: Array.from(importedMap.values()),
         };
       },
 
@@ -308,6 +302,7 @@ export const useStore = create<AppState>()(
             ? {
                 ...i,
                 ...updatedData,
+                unit: normalizeUnit(updatedData.unit ?? i.unit),
                 stock:
                   typeof updatedData.stock === 'number'
                     ? Math.max(0, updatedData.stock)

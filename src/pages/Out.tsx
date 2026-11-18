@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../store';
 import QRScanner from '../components/QRScanner';
+import { normalizeUnit, parseScannedQR } from '../utils/qrHelper';
 import { ArrowUpFromLine, QrCode, MinusCircle, AlertCircle, Package } from 'lucide-react';
 
 export default function Out() {
@@ -13,17 +14,19 @@ export default function Out() {
     i => i.barcode.toLowerCase() === barcode.trim().toLowerCase()
   );
 
-  const handleScanSuccess = (scannedCode: string) => {
+  const detectedUnit = detectedItem ? normalizeUnit(detectedItem.unit) : 'PCS';
+
+  const handleScanSuccess = (decodedText: string) => {
     setShowScanner(false);
-    const code = scannedCode.trim();
-    setBarcode(code);
+    const parsed = parseScannedQR(decodedText);
+    setBarcode(parsed.barcode.trim());
   };
 
   const handleManualOut = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedBarcode = barcode.trim();
     if (!trimmedBarcode) {
-      alert('Stock OUT karne ke liye barcode dalna zaroori hai!');
+      alert('Stock OUT karne ke liye product code dalna zaroori hai!');
       return;
     }
 
@@ -39,7 +42,9 @@ export default function Out() {
     }
 
     if (detectedItem.stock < quantity) {
-      alert(`Error: Stock kam hai! Current stock sirf ${detectedItem.stock} ${detectedItem.unit || 'Pcs'} hai.`);
+      alert(
+        `Error: Stock kam hai! Current stock sirf ${detectedItem.stock} ${detectedUnit} hai.`
+      );
       return;
     }
 
@@ -63,7 +68,7 @@ export default function Out() {
         </div>
         <h1 className="text-3xl font-bold text-slate-800">Stock OUT (Dispatch / Sale)</h1>
         <p className="text-slate-500 text-sm">
-          Barcode scan karein ya enter karein, quantity verify karke stock reduce karein.
+          Product QR scan karein ya manual product code enter karke quantity dispatch karein.
         </p>
       </div>
 
@@ -75,7 +80,7 @@ export default function Out() {
           className="bg-red-600 hover:bg-red-700 text-white text-base font-bold py-3.5 px-6 rounded-xl w-full flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer"
         >
           <QrCode size={22} />
-          <span>1 Scan Barcode / QR Code</span>
+          <span>1 Scan QR / Barcode</span>
         </button>
 
         <div className="flex items-center gap-4 text-slate-400">
@@ -95,7 +100,9 @@ export default function Out() {
                   <Package size={20} className="text-blue-600" />
                   {detectedItem.name}
                 </p>
-                <p className="text-xs font-mono text-slate-500 mt-0.5">Code: {detectedItem.barcode}</p>
+                <p className="text-xs font-mono text-slate-500 mt-0.5">
+                  Code: {detectedItem.barcode}
+                </p>
               </div>
               <div className="text-right">
                 <span
@@ -105,23 +112,31 @@ export default function Out() {
                       : 'bg-red-100 text-red-800'
                   }`}
                 >
-                  Stock: {detectedItem.stock} {detectedItem.unit || 'Pcs'}
+                  Stock: {detectedItem.stock} {detectedUnit}
                 </span>
               </div>
             </div>
 
-            {(detectedItem.size || detectedItem.color) && (
-              <div className="flex gap-4 text-xs text-slate-600 pt-1 border-t border-slate-200">
-                {detectedItem.size && <span>Size: <strong>{detectedItem.size}</strong></span>}
-                {detectedItem.color && <span>Color: <strong>{detectedItem.color}</strong></span>}
-                <span>Unit: <strong>{detectedItem.unit || 'Pcs'}</strong></span>
-              </div>
-            )}
+            <div className="flex flex-wrap gap-4 text-xs text-slate-600 pt-1 border-t border-slate-200">
+              {detectedItem.size && (
+                <span>
+                  Size: <strong>{detectedItem.size}</strong>
+                </span>
+              )}
+              {detectedItem.color && (
+                <span>
+                  Color: <strong>{detectedItem.color}</strong>
+                </span>
+              )}
+              <span>
+                Unit: <strong>{detectedUnit}</strong>
+              </span>
+            </div>
           </div>
         ) : barcode.trim() ? (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 text-sm flex items-center gap-2">
             <AlertCircle size={18} className="text-amber-600 shrink-0" />
-            <span>Ye barcode system mein register nahi hai. Pehle Stock IN karein.</span>
+            <span>Ye product code system mein register nahi hai. Pehle Stock IN karein.</span>
           </div>
         ) : null}
 
@@ -129,13 +144,13 @@ export default function Out() {
         <form onSubmit={handleManualOut} className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">
-              Barcode / Unique Code *
+              Unique Product Code *
             </label>
             <input
               type="text"
               value={barcode}
               onChange={e => setBarcode(e.target.value)}
-              placeholder="Barcode scan karein ya type karein (e.g. PRD-A8F291)"
+              placeholder="QR scan karein ya code type karein (e.g. PRD-T001)"
               className="w-full border-2 border-slate-200 p-3 rounded-xl text-base font-mono focus:border-red-500 focus:outline-none"
               required
             />
@@ -157,7 +172,7 @@ export default function Out() {
             />
             {detectedItem && detectedItem.stock < qty && (
               <p className="text-xs text-red-500 mt-1">
-                Requested quantity available stock ({detectedItem.stock}) se zyada hai!
+                Requested quantity available stock ({detectedItem.stock} {detectedUnit}) se zyada hai!
               </p>
             )}
           </div>
@@ -168,7 +183,9 @@ export default function Out() {
             className="bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-xl w-full flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer"
           >
             <MinusCircle size={22} />
-            <span>Process Stock OUT (-{qty} {detectedItem?.unit || 'Units'})</span>
+            <span>
+              Process Stock OUT (-{qty} {detectedUnit})
+            </span>
           </button>
         </form>
       </div>

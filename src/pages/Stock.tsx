@@ -1,5 +1,7 @@
 import { useState, useRef } from 'react';
-import { useStore, StockItem, generateUniqueCode } from '../store';
+import { useStore, StockItem } from '../store';
+import QRLabelModal from '../components/QRLabelModal';
+import { AllowedUnit, normalizeUnit } from '../utils/qrHelper';
 import {
   Package,
   Search,
@@ -11,6 +13,8 @@ import {
   X,
   Check,
   AlertCircle,
+  QrCode,
+  Printer,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -26,13 +30,20 @@ export default function Stock() {
     size: string;
     color: string;
     qty: number;
-    unit: string;
-    isAutoCode?: boolean;
+    unit: AllowedUnit;
   };
 
   const [previewItems, setPreviewItems] = useState<ParsedEntry[]>([]);
+  const [skippedMissingCodeCount, setSkippedMissingCodeCount] = useState<number>(0);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [fileName, setFileName] = useState('');
+
+  // QR Label Modal State
+  const [qrModalItems, setQrModalItems] = useState<StockItem[] | null>(null);
+  const [qrModalTitle, setQrModalTitle] = useState<string>('Printable QR Labels');
+
+  // Row selection for batch QR printing
+  const [selectedBarcodes, setSelectedBarcodes] = useState<string[]>([]);
 
   // Edit Modal State
   const [editingItem, setEditingItem] = useState<StockItem | null>(null);
@@ -40,7 +51,7 @@ export default function Stock() {
   const [editSize, setEditSize] = useState('');
   const [editColor, setEditColor] = useState('');
   const [editStock, setEditStock] = useState<number>(0);
-  const [editUnit, setEditUnit] = useState('Pcs');
+  const [editUnit, setEditUnit] = useState<AllowedUnit>('PCS');
 
   // Delete Modal State
   const [deletingItem, setDeletingItem] = useState<StockItem | null>(null);
@@ -58,32 +69,70 @@ export default function Stock() {
 
   const totalStockCount = items.reduce((acc, curr) => acc + curr.stock, 0);
 
-  // Download Sample Template
+  // Selection helpers
+  const toggleSelect = (barcode: string) => {
+    setSelectedBarcodes(prev =>
+      prev.includes(barcode) ? prev.filter(b => b !== barcode) : [...prev, barcode]
+    );
+  };
+
+  const allFilteredSelected =
+    filteredItems.length > 0 &&
+    filteredItems.every(i => selectedBarcodes.includes(i.barcode));
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedBarcodes([]);
+    } else {
+      setSelectedBarcodes(filteredItems.map(i => i.barcode));
+    }
+  };
+
+  const handleOpenBatchQR = () => {
+    const targetItems =
+      selectedBarcodes.length > 0
+        ? items.filter(i => selectedBarcodes.includes(i.barcode))
+        : filteredItems;
+
+    if (targetItems.length === 0) {
+      alert('Print karne ke liye koi product available nahi hai.');
+      return;
+    }
+
+    setQrModalTitle(
+      selectedBarcodes.length > 0
+        ? `Selected QR Labels (${targetItems.length})`
+        : `All Product QR Labels (${targetItems.length})`
+    );
+    setQrModalItems(targetItems);
+  };
+
+  // Download Sample Template (Manual Unique Code + PCS / KGS only)
   const handleDownloadSample = () => {
     const sampleData = [
       {
-        'Unique Code': 'PRD-A101',
-        'Product Name': 'Cotton T-Shirt',
-        Size: 'M',
+        'Unique Code': 'PRD-T001',
+        'Product Name': 'Tyre',
+        Size: '16 inch',
         Color: 'Black',
         Qty: 50,
-        Unit: 'Pcs',
+        Unit: 'PCS',
       },
       {
-        'Unique Code': '', // Leave blank to show auto-generation
-        'Product Name': 'Leather Formal Shoes',
-        Size: '42',
-        Color: 'Brown',
-        Qty: 20,
-        Unit: 'Pair',
+        'Unique Code': 'PRD-T002',
+        'Product Name': 'Tyre',
+        Size: '14 inch',
+        Color: 'Red',
+        Qty: 25,
+        Unit: 'PCS',
       },
       {
-        'Unique Code': 'PRD-B202',
-        'Product Name': 'Stainless Steel Bottle',
-        Size: '1000ml',
-        Color: 'Silver',
-        Qty: 100,
-        Unit: 'Pcs',
+        'Unique Code': 'PRD-R001',
+        'Product Name': 'Rubber Compound',
+        Size: 'Standard',
+        Color: 'Black',
+        Qty: 120,
+        Unit: 'KGS',
       },
     ];
 
@@ -107,18 +156,19 @@ export default function Stock() {
         const workbook = XLSX.read(buffer, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const rows: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+        const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(worksheet, {
+          defval: '',
+        });
 
         if (!rows || rows.length === 0) {
           alert('Excel / CSV file empty hai ya data rows nahi mili!');
           return;
         }
 
-        const existingCodes = items.map(i => i.barcode);
         const parsed: ParsedEntry[] = [];
+        let missingCodeCount = 0;
 
         for (const row of rows) {
-          // Flexible key lookup
           const findVal = (keywords: string[]) => {
             const key = Object.keys(row).find(k =>
               keywords.some(kw => k.trim().toLowerCase().includes(kw))
@@ -126,22 +176,24 @@ export default function Stock() {
             return key ? String(row[key]).trim() : '';
           };
 
-          let barcode = findVal(['unique code', 'code', 'barcode', 'sku', 'bar code']);
+          const barcode = findVal(['unique code', 'code', 'barcode', 'sku', 'bar code']);
           const name = findVal(['product name', 'name', 'item', 'product', 'title']);
           const size = findVal(['size']);
           const color = findVal(['color', 'colour']);
           const qtyStr = findVal(['qty', 'quantity', 'stock', 'count', 'units']);
-          const unit = findVal(['unit', 'uom']) || 'Pcs';
+          const unitRaw = findVal(['unit', 'uom']);
 
-          if (!name) continue; // Skip empty rows
+          if (!name && !barcode) continue; // completely empty row
 
-          let isAutoCode = false;
           if (!barcode) {
-            barcode = generateUniqueCode([...existingCodes, ...parsed.map(p => p.barcode)]);
-            isAutoCode = true;
+            missingCodeCount++;
+            continue; // Manual Unique Code is mandatory; do not auto-generate
           }
 
+          if (!name) continue;
+
           const qty = Math.max(1, parseInt(qtyStr) || 1);
+          const unit = normalizeUnit(unitRaw);
 
           parsed.push({
             barcode,
@@ -150,22 +202,25 @@ export default function Stock() {
             color,
             qty,
             unit,
-            isAutoCode,
           });
         }
 
         if (parsed.length === 0) {
           alert(
-            'File se koi valid products detect nahi hue. Kripya column names check karein (Unique Code, Product Name, Size, Color, Qty, Unit).'
+            missingCodeCount > 0
+              ? `${missingCodeCount} rows mein Unique Code missing hai. Kripya Excel sheet mein apna manual Unique Code (jaise PRD-T001) add karein.`
+              : 'File se koi valid products detect nahi hue. Columns check karein: Unique Code, Product Name, Size, Color, Qty, Unit (PCS/KGS).'
           );
           return;
         }
 
         setPreviewItems(parsed);
+        setSkippedMissingCodeCount(missingCodeCount);
         setShowPreviewModal(true);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('File parsing error:', err);
-        alert(`File read karne mein error aayi: ${err?.message || err}`);
+        const message = err instanceof Error ? err.message : String(err);
+        alert(`File read karne mein error aayi: ${message}`);
       } finally {
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
@@ -176,15 +231,24 @@ export default function Stock() {
     reader.readAsArrayBuffer(file);
   };
 
-  // Confirm and Execute Bulk Import
+  // Confirm and Execute Bulk Import -> Automatically Open Printable QR Labels!
   const handleConfirmImport = () => {
     if (previewItems.length === 0) return;
 
     const result = bulkStockIn(previewItems);
-    alert(result.message);
     setShowPreviewModal(false);
     setPreviewItems([]);
+    setSkippedMissingCodeCount(0);
     setFileName('');
+
+    if (result.importedItems.length > 0) {
+      setQrModalTitle(
+        `Auto-Generated QR Labels (${result.importedItems.length} Imported Items)`
+      );
+      setQrModalItems(result.importedItems);
+    } else {
+      alert(result.message);
+    }
   };
 
   // Open Edit Modal
@@ -194,7 +258,7 @@ export default function Stock() {
     setEditSize(item.size || '');
     setEditColor(item.color || '');
     setEditStock(item.stock);
-    setEditUnit(item.unit || 'Pcs');
+    setEditUnit(normalizeUnit(item.unit));
   };
 
   // Save Edit
@@ -212,7 +276,7 @@ export default function Stock() {
       size: editSize.trim(),
       color: editColor.trim(),
       stock: Math.max(0, editStock),
-      unit: editUnit.trim() || 'Pcs',
+      unit: editUnit,
     });
 
     alert(result.message);
@@ -225,6 +289,7 @@ export default function Stock() {
   const handleConfirmDelete = () => {
     if (!deletingItem) return;
     const result = deleteItem(deletingItem.barcode);
+    setSelectedBarcodes(prev => prev.filter(b => b !== deletingItem.barcode));
     alert(result.message);
     setDeletingItem(null);
   };
@@ -232,20 +297,37 @@ export default function Stock() {
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
       {/* Top Header & Action Buttons */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div>
           <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-2">
             <Package className="text-blue-600" size={30} />
             Full Stock List
           </h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            Godown inventory, Excel/CSV bulk import, and live stock editing.
+            Excel/CSV Stock IN, auto-generated printable QR codes, aur live stock management.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Print QR Labels Button */}
+          <button
+            type="button"
+            onClick={handleOpenBatchQR}
+            disabled={filteredItems.length === 0}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-colors cursor-pointer"
+            title="View & Print QR Labels"
+          >
+            <Printer size={16} />
+            <span>
+              {selectedBarcodes.length > 0
+                ? `Print QR (${selectedBarcodes.length})`
+                : 'Print All QR'}
+            </span>
+          </button>
+
           {/* Download Sample Template */}
           <button
+            type="button"
             onClick={handleDownloadSample}
             className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-semibold border border-slate-200 transition-colors cursor-pointer"
             title="Download sample Excel template"
@@ -273,7 +355,7 @@ export default function Stock() {
 
           {/* Total Units Badge */}
           <div className="bg-blue-50 border border-blue-200 px-4 py-2.5 rounded-xl text-blue-900 font-bold text-sm">
-            Total Units: <span className="text-blue-600 text-base">{totalStockCount}</span>
+            Total: <span className="text-blue-600 text-base">{totalStockCount}</span>
           </div>
         </div>
       </div>
@@ -286,7 +368,7 @@ export default function Stock() {
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search by Product Name, Unique Code / Barcode, Size, or Color..."
+            placeholder="Search by Product Name, Unique Code, Size, or Color..."
             className="w-full pl-11 pr-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 text-base"
           />
         </div>
@@ -295,83 +377,123 @@ export default function Stock() {
       {/* Stock Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[700px]">
+          <table className="w-full text-left border-collapse min-w-[780px]">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs font-semibold uppercase tracking-wider">
+                <th className="p-4 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    onChange={toggleSelectAll}
+                    className="w-4 h-4 rounded cursor-pointer accent-blue-600"
+                    title="Select all for QR print"
+                  />
+                </th>
                 <th className="p-4">Product Name</th>
-                <th className="p-4">Unique Code / SKU</th>
+                <th className="p-4">Unique Code</th>
                 <th className="p-4">Size</th>
                 <th className="p-4">Color</th>
                 <th className="p-4 text-right">Current Stock</th>
-                <th className="p-4 text-center">Actions</th>
+                <th className="p-4 text-center">QR & Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
-              {filteredItems.map(item => (
-                <tr key={item.barcode} className="hover:bg-slate-50/80 transition-colors">
-                  <td className="p-4 font-bold text-slate-800">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-blue-50 p-2 rounded-lg text-blue-600 shrink-0">
-                        <Package size={18} />
+              {filteredItems.map(item => {
+                const unit = normalizeUnit(item.unit);
+                const isSelected = selectedBarcodes.includes(item.barcode);
+                return (
+                  <tr
+                    key={item.barcode}
+                    className={`hover:bg-slate-50/80 transition-colors ${
+                      isSelected ? 'bg-blue-50/40' : ''
+                    }`}
+                  >
+                    <td className="p-4 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelect(item.barcode)}
+                        className="w-4 h-4 rounded cursor-pointer accent-blue-600"
+                      />
+                    </td>
+                    <td className="p-4 font-bold text-slate-800">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-blue-50 p-2 rounded-lg text-blue-600 shrink-0">
+                          <Package size={18} />
+                        </div>
+                        <span>{item.name}</span>
                       </div>
-                      <span>{item.name}</span>
-                    </div>
-                  </td>
-                  <td className="p-4 font-mono text-slate-600 font-medium">
-                    <span className="bg-slate-100 px-2.5 py-1 rounded-md text-xs">
-                      {item.barcode}
-                    </span>
-                  </td>
-                  <td className="p-4 text-slate-600">
-                    {item.size ? (
-                      <span className="bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-xs font-semibold">
-                        {item.size}
+                    </td>
+                    <td className="p-4 font-mono text-slate-600 font-medium">
+                      <span className="bg-slate-100 px-2.5 py-1 rounded-md text-xs font-bold">
+                        {item.barcode}
                       </span>
-                    ) : (
-                      <span className="text-slate-300">-</span>
-                    )}
-                  </td>
-                  <td className="p-4 text-slate-600">
-                    {item.color ? (
-                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold">
-                        <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block"></span>
-                        {item.color}
+                    </td>
+                    <td className="p-4 text-slate-600">
+                      {item.size ? (
+                        <span className="bg-slate-50 border border-slate-200 px-2 py-0.5 rounded text-xs font-semibold">
+                          {item.size}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">-</span>
+                      )}
+                    </td>
+                    <td className="p-4 text-slate-600">
+                      {item.color ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold">
+                          <span className="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block"></span>
+                          {item.color}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">-</span>
+                      )}
+                    </td>
+                    <td className="p-4 text-right">
+                      <span
+                        className={`inline-block px-3 py-1 rounded-full font-bold text-xs ${
+                          item.stock > 0
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}
+                      >
+                        {item.stock} {unit}
                       </span>
-                    ) : (
-                      <span className="text-slate-300">-</span>
-                    )}
-                  </td>
-                  <td className="p-4 text-right">
-                    <span
-                      className={`inline-block px-3 py-1 rounded-full font-bold text-xs ${
-                        item.stock > 0
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {item.stock} {item.unit || 'Pcs'}
-                    </span>
-                  </td>
-                  <td className="p-4 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <button
-                        onClick={() => handleStartEdit(item)}
-                        className="text-slate-500 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition-colors cursor-pointer"
-                        title="Edit Item"
-                      >
-                        <Edit2 size={17} />
-                      </button>
-                      <button
-                        onClick={() => setDeletingItem(item)}
-                        className="text-slate-500 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors cursor-pointer"
-                        title="Delete Item"
-                      >
-                        <Trash2 size={17} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="p-4 text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQrModalTitle(`QR Label — ${item.barcode}`);
+                            setQrModalItems([item]);
+                          }}
+                          className="text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 text-xs font-bold border border-indigo-200"
+                          title="Generate & Print QR Code"
+                        >
+                          <QrCode size={15} />
+                          <span>QR</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleStartEdit(item)}
+                          className="text-slate-500 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                          title="Edit Item"
+                        >
+                          <Edit2 size={17} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingItem(item)}
+                          className="text-slate-500 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                          title="Delete Item"
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -410,14 +532,24 @@ export default function Stock() {
             </div>
 
             <div className="p-6 overflow-y-auto space-y-4">
-              <div className="bg-green-50 border border-green-200 rounded-xl p-3.5 text-sm text-green-900 flex items-center justify-between">
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3.5 text-sm text-green-900 flex flex-wrap items-center justify-between gap-2">
                 <span className="font-semibold">
-                  Total Items Detected: {previewItems.length}
+                  Valid Items Ready for Import: {previewItems.length}
                 </span>
-                <span className="text-xs text-green-700">
-                  Yeh items Stock IN ke roop mein inventory mein add/update honge.
+                <span className="text-xs text-green-700 font-medium">
+                  Import ke baad sabhi items ke printable QR codes auto-generate ho jayenge.
                 </span>
               </div>
+
+              {skippedMissingCodeCount > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 flex items-center gap-2">
+                  <AlertCircle size={16} className="text-amber-600 shrink-0" />
+                  <span>
+                    <strong>{skippedMissingCodeCount} row(s)</strong> skip kar di gayi kyunki unme
+                    manual <strong>Unique Code</strong> blank tha.
+                  </span>
+                </div>
+              )}
 
               <div className="border border-slate-200 rounded-xl overflow-hidden">
                 <table className="w-full text-left border-collapse text-xs">
@@ -437,14 +569,9 @@ export default function Stock() {
                       <tr key={idx} className="hover:bg-slate-50">
                         <td className="p-3 text-slate-400">{idx + 1}</td>
                         <td className="p-3 font-mono">
-                          <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-semibold">
+                          <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-700 font-bold">
                             {item.barcode}
                           </span>
-                          {item.isAutoCode && (
-                            <span className="ml-1 text-[10px] text-blue-600 font-sans font-bold">
-                              (Auto)
-                            </span>
-                          )}
                         </td>
                         <td className="p-3 font-bold text-slate-800">{item.name}</td>
                         <td className="p-3 text-slate-600">{item.size || '-'}</td>
@@ -452,7 +579,7 @@ export default function Stock() {
                         <td className="p-3 text-right font-bold text-green-700">
                           +{item.qty}
                         </td>
-                        <td className="p-3 text-slate-600">{item.unit}</td>
+                        <td className="p-3 text-slate-600 font-bold">{item.unit}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -474,7 +601,7 @@ export default function Stock() {
                 className="px-6 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white font-bold transition-colors cursor-pointer shadow-md text-sm flex items-center gap-2"
               >
                 <Check size={18} />
-                <span>Confirm & Import ({previewItems.length} Items)</span>
+                <span>Confirm, Import & Generate QR ({previewItems.length})</span>
               </button>
             </div>
           </div>
@@ -501,7 +628,7 @@ export default function Stock() {
             <form onSubmit={handleSaveEdit} className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
-                  Unique Code / Barcode (Permanent)
+                  Unique Code (Permanent)
                 </label>
                 <input
                   type="text"
@@ -513,7 +640,7 @@ export default function Stock() {
 
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Product Name *
+                  Product Name / Category *
                 </label>
                 <input
                   type="text"
@@ -533,7 +660,7 @@ export default function Stock() {
                     type="text"
                     value={editSize}
                     onChange={e => setEditSize(e.target.value)}
-                    placeholder="e.g. M, L, XL, 42"
+                    placeholder="e.g. 16 inch, M, L"
                     className="w-full border-2 border-slate-200 p-2.5 rounded-xl text-base focus:border-blue-500 focus:outline-none"
                   />
                 </div>
@@ -545,7 +672,7 @@ export default function Stock() {
                     type="text"
                     value={editColor}
                     onChange={e => setEditColor(e.target.value)}
-                    placeholder="e.g. Blue, Red"
+                    placeholder="e.g. Black, Red"
                     className="w-full border-2 border-slate-200 p-2.5 rounded-xl text-base focus:border-blue-500 focus:outline-none"
                   />
                 </div>
@@ -571,17 +698,11 @@ export default function Stock() {
                   </label>
                   <select
                     value={editUnit}
-                    onChange={e => setEditUnit(e.target.value)}
-                    className="w-full border-2 border-slate-200 p-2.5 rounded-xl text-base bg-white focus:border-blue-500 focus:outline-none cursor-pointer"
+                    onChange={e => setEditUnit(normalizeUnit(e.target.value))}
+                    className="w-full border-2 border-slate-200 p-2.5 rounded-xl text-base bg-white font-semibold focus:border-blue-500 focus:outline-none cursor-pointer"
                   >
-                    <option value="Pcs">Pcs</option>
-                    <option value="Box">Box</option>
-                    <option value="Kg">Kg</option>
-                    <option value="Mtr">Mtr</option>
-                    <option value="Nos">Nos</option>
-                    <option value="Set">Set</option>
-                    <option value="Pair">Pair</option>
-                    <option value="Ltr">Ltr</option>
+                    <option value="PCS">PCS</option>
+                    <option value="KGS">KGS</option>
                   </select>
                 </div>
               </div>
@@ -623,7 +744,8 @@ export default function Stock() {
               delete karna chahte hain?
             </p>
             <p className="text-xs text-red-500 font-semibold bg-red-50 p-2.5 rounded-lg border border-red-200">
-              Iska current stock ({deletingItem.stock} {deletingItem.unit}) bhi remove ho jayega.
+              Iska current stock ({deletingItem.stock} {normalizeUnit(deletingItem.unit)}) bhi
+              remove ho jayega.
             </p>
 
             <div className="flex justify-end gap-3 pt-2">
@@ -644,6 +766,15 @@ export default function Stock() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* --- MODAL 4: PRINTABLE QR LABELS MODAL --- */}
+      {qrModalItems && (
+        <QRLabelModal
+          items={qrModalItems}
+          onClose={() => setQrModalItems(null)}
+          title={qrModalTitle}
+        />
       )}
     </div>
   );
