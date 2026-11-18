@@ -24,6 +24,7 @@ export type SheetTransaction = {
   unit?: AllowedUnit;
   source?: 'SCAN' | 'MANUAL' | 'EXCEL_IMPORT';
   doneBy?: string;
+  customerName?: string;
   timestamp: number;
 };
 
@@ -118,6 +119,7 @@ function normalizeLog(raw: Partial<SheetTransaction>): SheetTransaction {
     unit: normalizeUnit(raw.unit),
     source: raw.source || 'MANUAL',
     doneBy: String(raw.doneBy || '').trim(),
+    customerName: String(raw.customerName || '').trim(),
     timestamp: Number(raw.timestamp) || Date.now(),
   };
 }

@@ -73,18 +73,15 @@ export default function QRLabelModal({
 
     const cardsHtml = repeatedLabels
       .map(({ item, dataUrl }) => {
-        const sizeHtml = item.size
-          ? `<div class="size-line">Size: ${escaped(item.size)}</div>`
-          : '';
-        const colorHtml = item.color
-          ? `<div class="color-line">Color: ${escaped(item.color)}</div>`
+        const labelText = [item.size, item.color].filter(Boolean).join(', ');
+        const textHtml = labelText
+          ? `<div class="detail-line">${escaped(labelText)}</div>`
           : '';
 
         return `
           <div class="label-card">
             <img src="${dataUrl}" alt="QR Code" class="qr-img" />
-            ${sizeHtml}
-            ${colorHtml}
+            ${textHtml}
           </div>
         `;
       })
@@ -129,19 +126,11 @@ export default function QRLabelModal({
               display: block;
               margin: 0 auto 1.5mm auto;
             }
-            .size-line {
+            .detail-line {
               font-size: 8.5pt;
               font-weight: 700;
               color: #0f172a;
-              line-height: 1.15;
-              margin-bottom: 0.5mm;
-              word-break: break-word;
-            }
-            .color-line {
-              font-size: 8.5pt;
-              font-weight: 700;
-              color: #1e293b;
-              line-height: 1.15;
+              line-height: 1.2;
               word-break: break-word;
             }
             @media print {
@@ -190,16 +179,10 @@ export default function QRLabelModal({
       ctx.fillStyle = '#0f172a';
       ctx.textAlign = 'center';
 
-      let y = 392;
-      if (label.item.size) {
-        ctx.font = 'bold 22px sans-serif';
-        ctx.fillText(`Size: ${label.item.size}`, width / 2, y);
-        y += 28;
-      }
-
-      if (label.item.color) {
-        ctx.font = 'bold 22px sans-serif';
-        ctx.fillText(`Color: ${label.item.color}`, width / 2, y);
+      const detailText = [label.item.size, label.item.color].filter(Boolean).join(', ');
+      if (detailText) {
+        ctx.font = 'bold 21px sans-serif';
+        ctx.fillText(detailText, width / 2, 398, width - 20);
       }
 
       const link = document.createElement('a');
@@ -294,19 +277,12 @@ export default function QRLabelModal({
                     alt="QR Code"
                     className="w-[114px] h-[114px] object-contain mb-1"
                   />
-                  {/* Only Size & Color Shown Directly Below QR */}
+                  {/* Compact Detail Text Below QR (e.g. 6 MM HOLE MOTI, T-19) */}
                   {(label.item.size || label.item.color) && (
-                    <div className="w-full pt-0.5 space-y-0.5">
-                      {label.item.size && (
-                        <p className="font-bold text-slate-800 text-xs leading-tight">
-                          Size: {label.item.size}
-                        </p>
-                      )}
-                      {label.item.color && (
-                        <p className="font-bold text-slate-700 text-xs leading-tight">
-                          Color: {label.item.color}
-                        </p>
-                      )}
+                    <div className="w-full pt-0.5">
+                      <p className="font-bold text-slate-800 text-xs leading-tight">
+                        {[label.item.size, label.item.color].filter(Boolean).join(', ')}
+                      </p>
                     </div>
                   )}
 

@@ -194,7 +194,7 @@ export default function Activity() {
         cat.totalPcs += item.stock;
       }
 
-      const colorDisplay = (item.color || '').trim() || 'Unspecified Color';
+      const colorDisplay = (item.color || '').trim() || 'Fixed';
       const colorKey = colorDisplay.toLowerCase();
 
       let colorEntry = cat.colorMap.get(colorKey);
@@ -541,6 +541,11 @@ export default function Activity() {
                     <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full text-[11px] font-bold">
                       <User size={11} /> {log.doneBy || 'Admin'}
                     </span>
+                    {log.customerName && (
+                      <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full text-[11px] font-bold">
+                        Customer: {log.customerName}
+                      </span>
+                    )}
                     <span className="inline-flex items-center gap-1 text-slate-500 text-[11px] font-medium">
                       <Clock size={11} />
                       {new Date(log.timestamp).toLocaleString([], {

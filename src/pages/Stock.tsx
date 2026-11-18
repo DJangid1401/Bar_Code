@@ -18,6 +18,9 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
+// Feature toggle: set to true in the future to show Sample Excel & Upload Excel/CSV buttons again
+const SHOW_EXCEL_UPLOAD = false;
+
 export default function Stock() {
   const { items, currentUser, bulkStockIn, updateItem, deleteItem, isLoading, isSyncing } =
     useStore();
@@ -319,9 +322,6 @@ export default function Stock() {
             <Package className="text-blue-600" size={30} />
             Full Stock List
           </h1>
-          <p className="text-slate-500 text-sm mt-0.5">
-            Excel/CSV Stock IN, auto-generated printable QR codes, and live stock management.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
@@ -341,33 +341,37 @@ export default function Stock() {
             </span>
           </button>
 
-          {/* Download Sample Template */}
-          <button
-            type="button"
-            onClick={handleDownloadSample}
-            className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-semibold border border-slate-200 transition-colors cursor-pointer"
-            title="Download sample Excel template"
-          >
-            <Download size={16} />
-            <span>Sample Excel</span>
-          </button>
+          {SHOW_EXCEL_UPLOAD && (
+            <>
+              {/* Download Sample Template */}
+              <button
+                type="button"
+                onClick={handleDownloadSample}
+                className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-semibold border border-slate-200 transition-colors cursor-pointer"
+                title="Download sample Excel template"
+              >
+                <Download size={16} />
+                <span>Sample Excel</span>
+              </button>
 
-          {/* Upload Excel / CSV Button */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx, .xls, .csv"
-            onChange={handleFileChange}
-            className="hidden"
-            id="excel-file-upload"
-          />
-          <label
-            htmlFor="excel-file-upload"
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all active:scale-[0.98] cursor-pointer"
-          >
-            <Upload size={17} />
-            <span>Upload Excel / CSV (Stock IN)</span>
-          </label>
+              {/* Upload Excel / CSV Button */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                onChange={handleFileChange}
+                className="hidden"
+                id="excel-file-upload"
+              />
+              <label
+                htmlFor="excel-file-upload"
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all active:scale-[0.98] cursor-pointer"
+              >
+                <Upload size={17} />
+                <span>Upload Excel / CSV (Stock IN)</span>
+              </label>
+            </>
+          )}
 
           {/* Total Units Badge */}
           <div className="bg-blue-50 border border-blue-200 px-4 py-2.5 rounded-xl text-blue-900 font-bold text-sm">

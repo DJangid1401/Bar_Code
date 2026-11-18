@@ -54,6 +54,7 @@ export type ScanInPayload = {
 export type ScanOutPayload = {
   barcode: string;
   qty?: number;
+  customerName?: string;
 };
 
 function extractError(err: unknown, fallback: string): string {
@@ -364,6 +365,7 @@ export const useStore = create<AppState>()((set, get) => ({
 
     let barcode = '';
     let qty = 1;
+    let customerName = '';
 
     if (typeof payloadOrBarcode === 'string') {
       barcode = payloadOrBarcode.trim();
@@ -371,6 +373,7 @@ export const useStore = create<AppState>()((set, get) => ({
     } else {
       barcode = (payloadOrBarcode.barcode || '').trim();
       qty = roundQty(Number(payloadOrBarcode.qty) > 0 ? Number(payloadOrBarcode.qty) : 0);
+      customerName = (payloadOrBarcode.customerName || '').trim();
     }
 
     if (!barcode) {
@@ -388,6 +391,7 @@ export const useStore = create<AppState>()((set, get) => ({
         barcode,
         qty,
         doneBy,
+        customerName,
       });
 
       set({

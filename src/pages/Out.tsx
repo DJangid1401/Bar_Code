@@ -1,6 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import QRScanner from '../components/QRScanner';
+import {
+  DUMMY_CUSTOMERS,
+  ENABLE_DEMO_MODE,
+  getSavedDemoMode,
+} from '../utils/demoSalesData';
 import {
   normalizeUnit,
   parseScannedQR,
@@ -16,16 +21,29 @@ import {
   AlertCircle,
   Package,
   Scale,
+  User,
 } from 'lucide-react';
 
 type OutKgMode = 'PACKETS_500G' | 'DIRECT_KG';
 
 export default function Out() {
-  const { items, scanOut, isSyncing } = useStore();
+  const { items, logs, scanOut, isSyncing } = useStore();
   const [showScanner, setShowScanner] = useState(false);
   const [barcode, setBarcode] = useState('');
+  const [customerName, setCustomerName] = useState('');
   const [qty, setQty] = useState<string>('1');
   const [outKgMode, setOutKgMode] = useState<OutKgMode>('PACKETS_500G');
+
+  const customerSuggestions = useMemo(() => {
+    const includeDemo = ENABLE_DEMO_MODE && getSavedDemoMode();
+    const set = new Set<string>(includeDemo ? DUMMY_CUSTOMERS : []);
+    for (const log of logs) {
+      if (log.customerName?.trim()) {
+        set.add(log.customerName.trim());
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [logs]);
 
   const detectedItem = items.find(
     i => i.barcode.toLowerCase() === barcode.trim().toLowerCase()
@@ -106,14 +124,21 @@ export default function Out() {
       return;
     }
 
+    if (!customerName.trim()) {
+      alert('Please enter Customer Name for Stock OUT.');
+      return;
+    }
+
     const result = await scanOut({
       barcode: trimmedBarcode,
       qty: finalQtyToDeduct,
+      customerName: customerName.trim(),
     });
 
     alert(result.message);
     if (result.success) {
       setBarcode('');
+      setCustomerName('');
       setQty('1');
     }
   };
@@ -204,6 +229,29 @@ export default function Out() {
 
         {/* Dispatch Form */}
         <form onSubmit={handleManualOut} className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">
+              Customer Name *
+            </label>
+            <div className="relative">
+              <User className="absolute left-3.5 top-3.5 text-slate-400" size={18} />
+              <input
+                type="text"
+                list="customer-name-suggestions"
+                value={customerName}
+                onChange={e => setCustomerName(e.target.value)}
+                placeholder="Enter or select customer name (e.g. Shree Ganesh Traders)"
+                className="w-full pl-11 pr-4 py-3 border-2 border-slate-200 rounded-xl text-base focus:border-red-500 focus:outline-none"
+                required
+              />
+              <datalist id="customer-name-suggestions">
+                {customerSuggestions.map(name => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">
               Unique Product Code *
@@ -414,6 +462,7 @@ export default function Out() {
             type="submit"
             disabled={
               isSyncing ||
+              !customerName.trim() ||
               !barcode.trim() ||
               !detectedItem ||
               finalQtyToDeduct <= 0 ||

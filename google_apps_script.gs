@@ -44,6 +44,7 @@ var LOG_HEADERS = [
   'Source',
   'Done By',
   'Timestamp',
+  'Customer Name',
 ];
 
 var USER_HEADERS = [
@@ -204,6 +205,7 @@ function readAllData() {
       source: String(lrow[8] || 'MANUAL'),
       doneBy: String(lrow[9] || '').trim(),
       timestamp: Number(lrow[10]) || Date.now(),
+      customerName: String(lrow[11] || '').trim(),
     });
   }
 
@@ -479,6 +481,7 @@ function doPost(e) {
         source,
         doneBy,
         now,
+        '',
       ]);
 
       var updatedAll = readAllData();
@@ -495,6 +498,7 @@ function doPost(e) {
       var outCode = String(payload.barcode || '').trim();
       var outQty = roundQty(Number(payload.qty) || 0);
       var outBy = String(payload.doneBy || '').trim();
+      var outCustomer = String(payload.customerName || '').trim();
 
       if (!outCode) {
         return jsonResponse({ success: false, message: 'Product Code is required.' });
@@ -571,6 +575,7 @@ function doPost(e) {
         'MANUAL',
         outBy,
         now,
+        outCustomer,
       ]);
 
       var afterOut = readAllData();
@@ -684,6 +689,7 @@ function doPost(e) {
           'EXCEL_IMPORT',
           bulkBy,
           ts,
+          '',
         ]);
         processed++;
       }
