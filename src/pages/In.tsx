@@ -2,8 +2,26 @@ import { useState, useEffect } from 'react';
 import { useStore, StockItem } from '../store';
 import QRScanner from '../components/QRScanner';
 import QRLabelModal from '../components/QRLabelModal';
-import { AllowedUnit, normalizeUnit, parseScannedQR } from '../utils/qrHelper';
-import { ArrowDownToLine, QrCode, PlusCircle, CheckCircle, Printer } from 'lucide-react';
+import {
+  AllowedUnit,
+  normalizeUnit,
+  parseScannedQR,
+  PACKET_WEIGHT_KG,
+  packetsToKg,
+  roundQty,
+  sanitizeDecimalInput,
+} from '../utils/qrHelper';
+import {
+  ArrowDownToLine,
+  QrCode,
+  PlusCircle,
+  CheckCircle,
+  Printer,
+  Scale,
+  Package,
+} from 'lucide-react';
+
+type KgEntryMode = 'DIRECT_KG' | 'PACKETS_500G';
 
 export default function In() {
   const { items, scanIn, isSyncing } = useStore();
@@ -13,12 +31,16 @@ export default function In() {
   const [size, setSize] = useState('');
   const [color, setColor] = useState('');
   const [qty, setQty] = useState<string>('1');
-  const [unit, setUnit] = useState<AllowedUnit>('PCS');
+  const [unit, setUnit] = useState<AllowedUnit>('KGS');
+  const [kgMode, setKgMode] = useState<KgEntryMode>('DIRECT_KG');
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [lastSavedItem, setLastSavedItem] = useState<StockItem | null>(null);
   const [showQRModal, setShowQRModal] = useState(false);
 
-  const numericQty = parseInt(qty, 10) || 0;
+  const isKgs = unit === 'KGS';
+  const rawNumber = isKgs && kgMode === 'DIRECT_KG' ? parseFloat(qty) || 0 : parseInt(qty, 10) || 0;
+  const finalQtyToSave =
+    isKgs && kgMode === 'PACKETS_500G' ? packetsToKg(rawNumber) : roundQty(rawNumber);
 
   // Check if item exists in inventory
   const detectedItem = items.find(
@@ -55,7 +77,22 @@ export default function In() {
       setName(parsed.name || '');
       setSize(parsed.size || '');
       setColor(parsed.color || '');
-      setUnit(parsed.unit || 'PCS');
+      setUnit(parsed.unit || 'KGS');
+    }
+  };
+
+  const handleSwitchKgMode = (mode: KgEntryMode) => {
+    setKgMode(mode);
+    setQty(mode === 'PACKETS_500G' ? '1' : '1');
+  };
+
+  const handleStep = (delta: number) => {
+    if (isKgs && kgMode === 'DIRECT_KG') {
+      const next = roundQty(Math.max(0.5, rawNumber + delta * 0.5));
+      setQty(String(next));
+    } else {
+      const next = Math.max(1, Math.round(rawNumber) + delta);
+      setQty(String(next));
     }
   };
 
@@ -72,9 +109,8 @@ export default function In() {
       return;
     }
 
-    const quantity = parseInt(qty, 10);
-    if (!quantity || quantity <= 0) {
-      alert('Please enter a valid quantity (minimum 1).');
+    if (!finalQtyToSave || finalQtyToSave <= 0) {
+      alert('Please enter a valid quantity greater than 0.');
       return;
     }
 
@@ -83,7 +119,7 @@ export default function In() {
       name: name.trim(),
       size: size.trim(),
       color: color.trim(),
-      qty: quantity,
+      qty: finalQtyToSave,
       unit,
       source: lastScanned === barcode.trim() ? 'SCAN' : 'MANUAL',
     });
@@ -99,7 +135,6 @@ export default function In() {
       setSize('');
       setColor('');
       setQty('1');
-      setUnit('PCS');
       setLastScanned(null);
     }
   };
@@ -111,9 +146,6 @@ export default function In() {
           <ArrowDownToLine size={32} />
         </div>
         <h1 className="text-3xl font-bold text-slate-800">Stock IN (Inward)</h1>
-        <p className="text-slate-500 text-sm">
-          Scan a QR/Barcode or enter a Product Code manually, then fill in the details and quantity.
-        </p>
       </div>
 
       {/* Quick Print QR Banner for Last Saved Item */}
@@ -168,7 +200,9 @@ export default function In() {
                 <span className="font-bold">
                   {detectedItem.stock} {normalizeUnit(detectedItem.unit)}
                 </span>
-                . The entered quantity will be added to this stock.
+                {normalizeUnit(detectedItem.unit) === 'KGS' && (
+                  <span> ({roundQty(detectedItem.stock / PACKET_WEIGHT_KG)} packets of 500g)</span>
+                )}
               </p>
             </div>
           </div>
@@ -188,7 +222,7 @@ export default function In() {
                 setBarcode(e.target.value);
                 setLastScanned(null);
               }}
-              placeholder="Enter product code (e.g. PRD-T001)"
+              placeholder="Enter product code (e.g. PRD-HM001)"
               className="w-full border-2 border-slate-200 p-3 rounded-xl text-base font-mono focus:border-green-500 focus:outline-none"
               required
             />
@@ -203,7 +237,7 @@ export default function In() {
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="e.g. Tyre, Tube, Rim"
+              placeholder="e.g. HOLE MOTI, TYRE"
               className="w-full border-2 border-slate-200 p-3 rounded-xl text-base focus:border-green-500 focus:outline-none"
               required
             />
@@ -219,7 +253,7 @@ export default function In() {
                 type="text"
                 value={size}
                 onChange={e => setSize(e.target.value)}
-                placeholder="e.g. 16 inch, 14 inch, M, L"
+                placeholder="e.g. 6 MM HOLE MOTI, 2.5 MM"
                 className="w-full border-2 border-slate-200 p-3 rounded-xl text-base focus:border-green-500 focus:outline-none"
               />
             </div>
@@ -232,74 +266,219 @@ export default function In() {
                 type="text"
                 value={color}
                 onChange={e => setColor(e.target.value)}
-                placeholder="e.g. Black, Red, Blue"
+                placeholder="e.g. T-1, T-7, Black"
                 className="w-full border-2 border-slate-200 p-3 rounded-xl text-base focus:border-green-500 focus:outline-none"
               />
             </div>
           </div>
 
-          {/* Quantity and Unit (2 columns) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">
-                Quantity (Qty to IN) *
-              </label>
-              <div className="flex items-center gap-2">
+          {/* Base Unit Selector */}
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">
+              Base Stock Unit *
+            </label>
+            <select
+              value={unit}
+              onChange={e => {
+                const nextUnit = normalizeUnit(e.target.value);
+                setUnit(nextUnit);
+                if (nextUnit !== 'KGS') {
+                  setQty(String(Math.max(1, Math.round(rawNumber) || 1)));
+                }
+              }}
+              className="w-full border-2 border-slate-200 p-3 rounded-xl text-base bg-white font-semibold focus:border-green-500 focus:outline-none cursor-pointer"
+            >
+              <option value="KGS">KGS (Kilograms — Supports Direct KG &amp; 500g Packets)</option>
+              <option value="PAC">PAC (Packets)</option>
+              <option value="PCS">PCS (Pieces)</option>
+            </select>
+          </div>
+
+          {/* KGS Entry Mode Toggle (Direct KGS vs 500g Packets) */}
+          {isKgs && (
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Select Inward Entry Mode
+              </p>
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setQty(String(Math.max(1, numericQty - 1)))}
-                  className="bg-slate-100 hover:bg-slate-200 border-2 border-slate-200 text-slate-800 font-bold w-12 h-[52px] rounded-xl text-xl flex items-center justify-center shrink-0 cursor-pointer transition-colors"
-                  aria-label="Decrease quantity"
+                  onClick={() => handleSwitchKgMode('DIRECT_KG')}
+                  className={`py-2.5 px-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 border-2 transition-all cursor-pointer ${
+                    kgMode === 'DIRECT_KG'
+                      ? 'bg-green-600 text-white border-green-600 shadow-sm'
+                      : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
+                  }`}
                 >
-                  −
+                  <Scale size={16} />
+                  <span>Direct KGS</span>
                 </button>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={qty}
-                  onChange={e => setQty(e.target.value.replace(/[^\d]/g, ''))}
-                  placeholder="Enter qty"
-                  className="w-full border-2 border-slate-200 p-3 rounded-xl text-base text-center font-bold text-slate-800 focus:border-green-500 focus:outline-none"
-                  required
-                />
                 <button
                   type="button"
-                  onClick={() => setQty(String(numericQty + 1))}
-                  className="bg-slate-100 hover:bg-slate-200 border-2 border-slate-200 text-slate-800 font-bold w-12 h-[52px] rounded-xl text-xl flex items-center justify-center shrink-0 cursor-pointer transition-colors"
-                  aria-label="Increase quantity"
+                  onClick={() => handleSwitchKgMode('PACKETS_500G')}
+                  className={`py-2.5 px-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 border-2 transition-all cursor-pointer ${
+                    kgMode === 'PACKETS_500G'
+                      ? 'bg-green-600 text-white border-green-600 shadow-sm'
+                      : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
+                  }`}
                 >
-                  +
+                  <Package size={16} />
+                  <span>500g Packets</span>
                 </button>
               </div>
             </div>
+          )}
 
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1">
-                Unit *
-              </label>
-              <select
-                value={unit}
-                onChange={e => setUnit(normalizeUnit(e.target.value))}
-                className="w-full border-2 border-slate-200 p-3 rounded-xl text-base bg-white font-semibold focus:border-green-500 focus:outline-none cursor-pointer"
+          {/* Quantity Input with +/- Steppers */}
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">
+              {isKgs
+                ? kgMode === 'PACKETS_500G'
+                  ? 'Number of 500g Packets *'
+                  : 'Weight in KGS (e.g. 5.5) *'
+                : `Quantity (${unit}) *`}
+            </label>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleStep(-1)}
+                className="bg-slate-100 hover:bg-slate-200 border-2 border-slate-200 text-slate-800 font-bold w-12 h-[52px] rounded-xl text-xl flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                aria-label="Decrease quantity"
               >
-                <option value="PCS">PCS</option>
-                <option value="KGS">KGS</option>
-                <option value="PAC">PAC</option>
-              </select>
+                −
+              </button>
+              <input
+                type="text"
+                inputMode={isKgs && kgMode === 'DIRECT_KG' ? 'decimal' : 'numeric'}
+                value={qty}
+                onChange={e =>
+                  setQty(
+                    isKgs && kgMode === 'DIRECT_KG'
+                      ? sanitizeDecimalInput(e.target.value)
+                      : e.target.value.replace(/[^\d]/g, '')
+                  )
+                }
+                placeholder={
+                  isKgs && kgMode === 'DIRECT_KG'
+                    ? 'e.g. 5.5'
+                    : isKgs && kgMode === 'PACKETS_500G'
+                    ? 'e.g. 10'
+                    : 'Enter qty'
+                }
+                className="w-full border-2 border-slate-200 p-3 rounded-xl text-base text-center font-bold text-slate-800 focus:border-green-500 focus:outline-none"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => handleStep(1)}
+                className="bg-slate-100 hover:bg-slate-200 border-2 border-slate-200 text-slate-800 font-bold w-12 h-[52px] rounded-xl text-xl flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                aria-label="Increase quantity"
+              >
+                +
+              </button>
             </div>
+
+            {/* Quick Preset Chips by Unit (KGS Packets / PAC / PCS) */}
+            {isKgs && kgMode === 'PACKETS_500G' && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {[1, 2, 5, 10, 20].map(preset => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setQty(String(preset))}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                      rawNumber === preset
+                        ? 'bg-green-100 text-green-800 border-green-300'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {preset} {preset === 1 ? 'Pkt' : 'Pkts'} ({packetsToKg(preset)} kg)
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {unit === 'PAC' && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {[1, 2, 5, 10, 20].map(preset => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setQty(String(preset))}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                      rawNumber === preset
+                        ? 'bg-green-100 text-green-800 border-green-300'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    +{preset} PAC
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {unit === 'PCS' && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {[1, 5, 10, 25, 50].map(preset => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setQty(String(preset))}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                      rawNumber === preset
+                        ? 'bg-green-100 text-green-800 border-green-300'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    +{preset} PCS
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Live Calculation Preview Box */}
+            {isKgs && kgMode === 'PACKETS_500G' && rawNumber > 0 && (
+              <div className="mt-2.5 bg-green-50 border border-green-200 rounded-xl px-4 py-2.5 text-sm text-green-900 flex items-center justify-between">
+                <span className="font-medium">
+                  KGS Logic: <strong>{rawNumber}</strong> packets &times;{' '}
+                  <strong>{PACKET_WEIGHT_KG} kg</strong>
+                </span>
+                <span className="font-extrabold text-green-700 text-base">
+                  = +{finalQtyToSave} KGS
+                </span>
+              </div>
+            )}
+
+            {!isKgs && finalQtyToSave > 0 && (
+              <div className="mt-2.5 bg-green-50 border border-green-200 rounded-xl px-4 py-2.5 text-sm text-green-900 flex items-center justify-between">
+                <span className="font-medium">
+                  {unit} Logic: Direct {unit === 'PAC' ? 'Packet' : 'Piece'} Inward
+                  {detectedItem && (
+                    <span className="text-xs text-green-700 ml-2">
+                      (New stock: {roundQty(detectedItem.stock + finalQtyToSave)} {unit})
+                    </span>
+                  )}
+                </span>
+                <span className="font-extrabold text-green-700 text-base">
+                  +{finalQtyToSave} {unit}
+                </span>
+              </div>
+            )}
           </div>
 
           <button
             type="submit"
-            disabled={isSyncing || numericQty <= 0}
+            disabled={isSyncing || finalQtyToSave <= 0}
             className="bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-xl w-full flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer mt-2"
           >
             <PlusCircle size={22} />
             <span>
               {isSyncing
-                ? 'Saving to Google Sheet...'
-                : `Submit Stock IN (+${numericQty || 0} ${unit})`}
+                ? 'Saving Stock IN...'
+                : isKgs && kgMode === 'PACKETS_500G'
+                ? `Submit Stock IN (+${finalQtyToSave} KGS • ${rawNumber} ${rawNumber === 1 ? 'Packet' : 'Packets'})`
+                : `Submit Stock IN (+${finalQtyToSave} ${unit})`}
             </span>
           </button>
         </form>

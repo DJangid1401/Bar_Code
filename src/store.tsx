@@ -5,11 +5,41 @@ import {
   isGoogleSheetConfigured,
   SheetStockItem,
   SheetTransaction,
+  SheetUser,
 } from './services/googleSheets';
-import { AllowedUnit, normalizeUnit } from './utils/qrHelper';
+import { AllowedUnit, normalizeUnit, roundQty } from './utils/qrHelper';
 
 export type Transaction = SheetTransaction;
 export type StockItem = SheetStockItem;
+export type AppUser = SheetUser;
+
+const SESSION_KEY = 'qr_inventory_active_user';
+
+function loadSavedUser(): AppUser | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AppUser;
+    if (parsed && parsed.username && parsed.name) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function saveUserSession(user: AppUser | null) {
+  try {
+    if (user) {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(SESSION_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
 
 export type ScanInPayload = {
   barcode: string;
@@ -29,10 +59,10 @@ export type ScanOutPayload = {
 function extractError(err: unknown, fallback: string): string {
   if (err instanceof Error) {
     if (err.name === 'AbortError') {
-      return 'Request timed out. Google Sheet did not respond in time. Please try again.';
+      return 'Request timed out. Please try again.';
     }
     if (err.message === 'Failed to fetch') {
-      return 'Could not connect to Google Sheet (CORS blocked). Ensure Apps Script is deployed with "Who has access: Anyone" and a New version is published.';
+      return 'Could not connect to server. Please check your internet connection and try again.';
     }
     return err.message;
   }
@@ -42,12 +72,28 @@ function extractError(err: unknown, fallback: string): string {
 interface AppState {
   items: StockItem[];
   logs: Transaction[];
+  users: AppUser[];
+  currentUser: AppUser | null;
   isLoading: boolean;
   isSyncing: boolean;
+  isUsersLoading: boolean;
   lastSyncedAt: number | null;
   error: string | null;
   isConfigured: boolean;
   clearError: () => void;
+  login: (
+    username: string,
+    password: string
+  ) => Promise<{ success: boolean; message: string }>;
+  logout: () => void;
+  fetchUsers: () => Promise<void>;
+  createUser: (data: {
+    name: string;
+    username: string;
+    password: string;
+    role: 'Admin' | 'Staff';
+  }) => Promise<{ success: boolean; message: string }>;
+  deleteUser: (id: string) => Promise<{ success: boolean; message: string }>;
   fetchData: (silent?: boolean) => Promise<void>;
   startAutoSync: (intervalMs?: number) => () => void;
   scanIn: (
@@ -79,21 +125,119 @@ interface AppState {
 export const useStore = create<AppState>()((set, get) => ({
   items: [],
   logs: [],
+  users: [],
+  currentUser: loadSavedUser(),
   isLoading: false,
   isSyncing: false,
+  isUsersLoading: false,
   lastSyncedAt: null,
   error: null,
   isConfigured: isGoogleSheetConfigured(),
 
   clearError: () => set({ error: null }),
 
+  login: async (username, password) => {
+    const cleanUser = username.trim();
+    const cleanPass = password.trim();
+    if (!cleanUser || !cleanPass) {
+      return { success: false, message: 'Please enter both Login ID and Password.' };
+    }
+
+    set({ isSyncing: true, error: null });
+    try {
+      const res = await postGoogleSheetAction('LOGIN', {
+        username: cleanUser,
+        password: cleanPass,
+      });
+
+      if (res.user) {
+        saveUserSession(res.user);
+        set({ currentUser: res.user, isSyncing: false });
+        return { success: true, message: `Welcome, ${res.user.name}!` };
+      }
+
+      set({ isSyncing: false });
+      return { success: false, message: res.message || 'Invalid Login ID or Password.' };
+    } catch (err) {
+      const message = extractError(err, 'Login failed.');
+      // Graceful fallback if Apps Script hasn't been updated with LOGIN action yet
+      if (
+        message.includes('Unknown action: LOGIN') &&
+        cleanUser.toLowerCase() === 'admin' &&
+        cleanPass === 'admin123'
+      ) {
+        const fallbackAdmin: AppUser = {
+          id: 'admin-default',
+          name: 'Admin',
+          username: 'admin',
+          role: 'Admin',
+        };
+        saveUserSession(fallbackAdmin);
+        set({ currentUser: fallbackAdmin, isSyncing: false });
+        return { success: true, message: 'Welcome, Admin!' };
+      }
+
+      set({ isSyncing: false });
+      return { success: false, message };
+    }
+  },
+
+  logout: () => {
+    saveUserSession(null);
+    set({ currentUser: null, users: [] });
+  },
+
+  fetchUsers: async () => {
+    if (!isGoogleSheetConfigured()) return;
+    set({ isUsersLoading: true });
+    try {
+      const res = await postGoogleSheetAction('GET_USERS', {});
+      set({ users: res.users || [], isUsersLoading: false });
+    } catch (err) {
+      const msg = extractError(err, 'Failed to load users.');
+      console.error('fetchUsers error:', err);
+      set({ isUsersLoading: false, error: msg });
+    }
+  },
+
+  createUser: async data => {
+    if (!isGoogleSheetConfigured()) {
+      return { success: false, message: 'Server connection is not configured.' };
+    }
+    set({ isSyncing: true, error: null });
+    try {
+      const res = await postGoogleSheetAction('CREATE_USER', data);
+      set({ users: res.users || get().users, isSyncing: false });
+      return { success: true, message: res.message || 'User created successfully.' };
+    } catch (err) {
+      const message = extractError(err, 'Failed to create user.');
+      set({ isSyncing: false, error: message });
+      return { success: false, message };
+    }
+  },
+
+  deleteUser: async id => {
+    if (!isGoogleSheetConfigured()) {
+      return { success: false, message: 'Server connection is not configured.' };
+    }
+    set({ isSyncing: true, error: null });
+    try {
+      const res = await postGoogleSheetAction('DELETE_USER', { id });
+      set({ users: res.users || get().users.filter(u => u.id !== id), isSyncing: false });
+      return { success: true, message: res.message || 'User deleted successfully.' };
+    } catch (err) {
+      const message = extractError(err, 'Failed to delete user.');
+      set({ isSyncing: false, error: message });
+      return { success: false, message };
+    }
+  },
+
   fetchData: async (silent = false) => {
     if (!isGoogleSheetConfigured()) {
       set({
         isLoading: false,
         isConfigured: false,
-        error:
-          'Google Sheet Web App URL is not configured. Please add VITE_GOOGLE_SHEET_URL in .env.local.',
+        error: 'Cloud backend URL is not configured.',
       });
       return;
     }
@@ -113,8 +257,8 @@ export const useStore = create<AppState>()((set, get) => ({
         error: null,
       });
     } catch (err) {
-      const message = extractError(err, 'Failed to load data from Google Sheet.');
-      console.error('Google Sheets fetchData error:', err);
+      const message = extractError(err, 'Failed to load inventory data.');
+      console.error('fetchData error:', err);
       set({
         isLoading: false,
         error: message,
@@ -127,7 +271,12 @@ export const useStore = create<AppState>()((set, get) => ({
 
     const timer = window.setInterval(() => {
       const state = get();
-      if (document.visibilityState === 'visible' && !state.isSyncing && !state.isLoading) {
+      if (
+        state.currentUser &&
+        document.visibilityState === 'visible' &&
+        !state.isSyncing &&
+        !state.isLoading
+      ) {
         state.fetchData(true);
       }
     }, intervalMs);
@@ -139,10 +288,7 @@ export const useStore = create<AppState>()((set, get) => ({
 
   scanIn: async (payloadOrBarcode, fallbackName) => {
     if (!isGoogleSheetConfigured()) {
-      return {
-        success: false,
-        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
-      };
+      return { success: false, message: 'Cloud backend is not configured.' };
     }
 
     let barcode = '';
@@ -150,7 +296,7 @@ export const useStore = create<AppState>()((set, get) => ({
     let qty = 1;
     let size = '';
     let color = '';
-    let unit: AllowedUnit = 'PCS';
+    let unit: AllowedUnit = 'KGS';
     let source: 'SCAN' | 'MANUAL' | 'EXCEL_IMPORT' = 'MANUAL';
 
     if (typeof payloadOrBarcode === 'string') {
@@ -159,7 +305,7 @@ export const useStore = create<AppState>()((set, get) => ({
     } else {
       barcode = (payloadOrBarcode.barcode || '').trim();
       name = (payloadOrBarcode.name || '').trim();
-      qty = Number(payloadOrBarcode.qty) > 0 ? Number(payloadOrBarcode.qty) : 1;
+      qty = roundQty(Number(payloadOrBarcode.qty) > 0 ? Number(payloadOrBarcode.qty) : 0);
       size = (payloadOrBarcode.size || '').trim();
       color = (payloadOrBarcode.color || '').trim();
       unit = normalizeUnit(payloadOrBarcode.unit);
@@ -172,6 +318,11 @@ export const useStore = create<AppState>()((set, get) => ({
     if (!name) {
       return { success: false, message: 'Product Name is required.' };
     }
+    if (qty <= 0) {
+      return { success: false, message: 'Quantity must be greater than 0.' };
+    }
+
+    const doneBy = get().currentUser?.name || 'Admin';
 
     set({ isSyncing: true, error: null });
     try {
@@ -183,6 +334,7 @@ export const useStore = create<AppState>()((set, get) => ({
         color,
         unit,
         source,
+        doneBy,
       });
 
       set({
@@ -194,12 +346,12 @@ export const useStore = create<AppState>()((set, get) => ({
 
       return {
         success: true,
-        message: `Success: +${qty} ${unit} of "${name}" added to Stock IN.`,
+        message: `Success: +${qty} ${unit} of "${name}" added to Stock IN by ${doneBy}.`,
         item: res.item,
       };
     } catch (err) {
       const message = extractError(err, 'Failed to save Stock IN entry.');
-      console.error('Google Sheets scanIn error:', err);
+      console.error('scanIn error:', err);
       set({ isSyncing: false, error: message });
       return { success: false, message: `Error: ${message}` };
     }
@@ -207,10 +359,7 @@ export const useStore = create<AppState>()((set, get) => ({
 
   scanOut: async (payloadOrBarcode, fallbackQty) => {
     if (!isGoogleSheetConfigured()) {
-      return {
-        success: false,
-        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
-      };
+      return { success: false, message: 'Cloud backend is not configured.' };
     }
 
     let barcode = '';
@@ -218,21 +367,27 @@ export const useStore = create<AppState>()((set, get) => ({
 
     if (typeof payloadOrBarcode === 'string') {
       barcode = payloadOrBarcode.trim();
-      qty = Number(fallbackQty) > 0 ? Number(fallbackQty) : 1;
+      qty = roundQty(Number(fallbackQty) > 0 ? Number(fallbackQty) : 0);
     } else {
       barcode = (payloadOrBarcode.barcode || '').trim();
-      qty = Number(payloadOrBarcode.qty) > 0 ? Number(payloadOrBarcode.qty) : 1;
+      qty = roundQty(Number(payloadOrBarcode.qty) > 0 ? Number(payloadOrBarcode.qty) : 0);
     }
 
     if (!barcode) {
       return { success: false, message: 'Unique Product Code is required.' };
     }
+    if (qty <= 0) {
+      return { success: false, message: 'Dispatch quantity must be greater than 0.' };
+    }
+
+    const doneBy = get().currentUser?.name || 'Admin';
 
     set({ isSyncing: true, error: null });
     try {
       const res = await postGoogleSheetAction('SCAN_OUT', {
         barcode,
         qty,
+        doneBy,
       });
 
       set({
@@ -244,11 +399,11 @@ export const useStore = create<AppState>()((set, get) => ({
 
       return {
         success: true,
-        message: `Success: -${qty} dispatched from stock.`,
+        message: res.message || `Success: -${qty} dispatched by ${doneBy}.`,
       };
     } catch (err) {
       const message = extractError(err, 'Failed to save Stock OUT entry.');
-      console.error('Google Sheets scanOut error:', err);
+      console.error('scanOut error:', err);
       set({ isSyncing: false, error: message });
       return { success: false, message: `Error: ${message}` };
     }
@@ -258,15 +413,18 @@ export const useStore = create<AppState>()((set, get) => ({
     if (!isGoogleSheetConfigured()) {
       return {
         count: 0,
-        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
+        message: 'Cloud backend is not configured.',
         importedItems: [],
       };
     }
+
+    const doneBy = get().currentUser?.name || 'Admin';
 
     set({ isSyncing: true, error: null });
     try {
       const res = await postGoogleSheetAction('BULK_STOCK_IN', {
         entries,
+        doneBy,
       });
 
       set({
@@ -279,12 +437,12 @@ export const useStore = create<AppState>()((set, get) => ({
       const count = res.count ?? (res.importedItems?.length || 0);
       return {
         count,
-        message: `Success: ${count} item(s) imported into Google Sheet as Stock IN.`,
+        message: `Success: ${count} item(s) imported as Stock IN by ${doneBy}.`,
         importedItems: res.importedItems || [],
       };
     } catch (err) {
-      const message = extractError(err, 'Failed to import Excel/CSV into Google Sheet.');
-      console.error('Google Sheets bulkStockIn error:', err);
+      const message = extractError(err, 'Failed to import Excel/CSV.');
+      console.error('bulkStockIn error:', err);
       set({ isSyncing: false, error: message });
       return {
         count: 0,
@@ -296,11 +454,10 @@ export const useStore = create<AppState>()((set, get) => ({
 
   updateItem: async (barcode, updatedData) => {
     if (!isGoogleSheetConfigured()) {
-      return {
-        success: false,
-        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
-      };
+      return { success: false, message: 'Cloud backend is not configured.' };
     }
+
+    const updatedBy = get().currentUser?.name || 'Admin';
 
     set({ isSyncing: true, error: null });
     try {
@@ -308,6 +465,7 @@ export const useStore = create<AppState>()((set, get) => ({
         barcode,
         ...updatedData,
         unit: updatedData.unit ? normalizeUnit(updatedData.unit) : undefined,
+        updatedBy,
       });
 
       set({
@@ -323,7 +481,7 @@ export const useStore = create<AppState>()((set, get) => ({
       };
     } catch (err) {
       const message = extractError(err, 'Failed to update product.');
-      console.error('Google Sheets updateItem error:', err);
+      console.error('updateItem error:', err);
       set({ isSyncing: false, error: message });
       return { success: false, message: `Error: ${message}` };
     }
@@ -331,10 +489,7 @@ export const useStore = create<AppState>()((set, get) => ({
 
   deleteItem: async barcode => {
     if (!isGoogleSheetConfigured()) {
-      return {
-        success: false,
-        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
-      };
+      return { success: false, message: 'Cloud backend is not configured.' };
     }
 
     set({ isSyncing: true, error: null });
@@ -354,7 +509,7 @@ export const useStore = create<AppState>()((set, get) => ({
       };
     } catch (err) {
       const message = extractError(err, 'Failed to delete product.');
-      console.error('Google Sheets deleteItem error:', err);
+      console.error('deleteItem error:', err);
       set({ isSyncing: false, error: message });
       return { success: false, message: `Error: ${message}` };
     }
@@ -362,10 +517,7 @@ export const useStore = create<AppState>()((set, get) => ({
 
   deleteLog: async id => {
     if (!isGoogleSheetConfigured()) {
-      return {
-        success: false,
-        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
-      };
+      return { success: false, message: 'Cloud backend is not configured.' };
     }
 
     set({ isSyncing: true, error: null });
@@ -385,7 +537,7 @@ export const useStore = create<AppState>()((set, get) => ({
       };
     } catch (err) {
       const message = extractError(err, 'Failed to delete transaction log.');
-      console.error('Google Sheets deleteLog error:', err);
+      console.error('deleteLog error:', err);
       set({ isSyncing: false, error: message });
       return { success: false, message: `Error: ${message}` };
     }

@@ -2,6 +2,23 @@ import QRCode from 'qrcode';
 
 export type AllowedUnit = 'PCS' | 'KGS' | 'PAC';
 
+export const PACKET_WEIGHT_KG = 0.5; // 500g = 0.5 KG
+
+export function roundQty(val: number): number {
+  return Math.round((Number(val) || 0) * 1000) / 1000;
+}
+
+export function packetsToKg(packets: number): number {
+  return roundQty((Number(packets) || 0) * PACKET_WEIGHT_KG);
+}
+
+export function sanitizeDecimalInput(value: string): string {
+  const cleaned = value.replace(/[^\d.]/g, '');
+  const parts = cleaned.split('.');
+  if (parts.length <= 1) return cleaned;
+  return `${parts[0]}.${parts.slice(1).join('')}`;
+}
+
 export function normalizeUnit(unit?: string): AllowedUnit {
   const u = (unit || '').trim().toUpperCase();
   if (u === 'KG' || u === 'KGS' || u === 'KILOGRAM' || u === 'KILOGRAMS') {
@@ -100,7 +117,7 @@ export async function generateQRDataUrl(item: QRItemDetails): Promise<string> {
   const payload = buildQRPayload(item);
   return QRCode.toDataURL(payload, {
     width: 240,
-    margin: 2,
+    margin: 0,
     errorCorrectionLevel: 'M',
     color: {
       dark: '#000000',

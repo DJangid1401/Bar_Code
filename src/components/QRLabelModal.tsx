@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { StockItem } from '../store';
-import { generateQRDataUrl, normalizeUnit } from '../utils/qrHelper';
+import { generateQRDataUrl } from '../utils/qrHelper';
 import { X, Printer, QrCode, Download, Copy } from 'lucide-react';
 
 interface QRLabelModalProps {
@@ -73,18 +73,18 @@ export default function QRLabelModal({
 
     const cardsHtml = repeatedLabels
       .map(({ item, dataUrl }) => {
-        const unit = normalizeUnit(item.unit);
-        const metaParts: string[] = [];
-        if (item.size) metaParts.push(`Size: ${escaped(item.size)}`);
-        if (item.color) metaParts.push(`Color: ${escaped(item.color)}`);
-        metaParts.push(`Unit: ${escaped(unit)}`);
+        const sizeHtml = item.size
+          ? `<div class="size-line">Size: ${escaped(item.size)}</div>`
+          : '';
+        const colorHtml = item.color
+          ? `<div class="color-line">Color: ${escaped(item.color)}</div>`
+          : '';
 
         return `
           <div class="label-card">
-            <img src="${dataUrl}" alt="${escaped(item.barcode)}" class="qr-img" />
-            <div class="code">${escaped(item.barcode)}</div>
-            <div class="name">${escaped(item.name)}</div>
-            <div class="meta">${metaParts.join(' &bull; ')}</div>
+            <img src="${dataUrl}" alt="QR Code" class="qr-img" />
+            ${sizeHtml}
+            ${colorHtml}
           </div>
         `;
       })
@@ -105,14 +105,16 @@ export default function QRLabelModal({
               padding: 12px;
             }
             .grid {
-              display: grid;
-              grid-template-columns: repeat(3, 1fr);
-              gap: 12px;
+              display: flex;
+              flex-wrap: wrap;
+              gap: 8px;
+              align-items: flex-start;
             }
             .label-card {
               border: 1.5px dashed #334155;
-              border-radius: 8px;
-              padding: 10px 8px;
+              border-radius: 6px;
+              padding: 4px;
+              width: 156px;
               text-align: center;
               page-break-inside: avoid;
               break-inside: avoid;
@@ -122,28 +124,25 @@ export default function QRLabelModal({
               justify-content: center;
             }
             .qr-img {
-              width: 140px;
-              height: 140px;
+              width: 146px;
+              height: 146px;
               display: block;
-              margin: 0 auto 6px auto;
+              margin: 0 auto 3px auto;
             }
-            .code {
-              font-family: Consolas, Monaco, monospace;
-              font-size: 14px;
-              font-weight: 800;
-              letter-spacing: 0.5px;
-              margin-bottom: 2px;
-            }
-            .name {
-              font-size: 13px;
+            .size-line {
+              font-size: 12px;
               font-weight: 700;
-              margin-bottom: 3px;
+              color: #0f172a;
+              line-height: 1.15;
+              margin-bottom: 1px;
               word-break: break-word;
             }
-            .meta {
-              font-size: 11px;
-              color: #334155;
-              line-height: 1.3;
+            .color-line {
+              font-size: 12px;
+              font-weight: 700;
+              color: #1e293b;
+              line-height: 1.15;
+              word-break: break-word;
             }
             @media print {
               body { padding: 4mm; }
@@ -168,10 +167,10 @@ export default function QRLabelModal({
   };
 
   const handleDownloadSingle = (label: GeneratedLabel) => {
-    // Draw a crisp sticker image (QR + product details below) onto canvas for download
+    // Draw a tight sticker image with minimal left/right/bottom margin
     const canvas = document.createElement('canvas');
-    const width = 340;
-    const height = 430;
+    const width = 256;
+    const height = 304;
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
@@ -181,36 +180,27 @@ export default function QRLabelModal({
     ctx.fillRect(0, 0, width, height);
 
     ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(8, 8, width - 16, height - 16);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(2, 2, width - 4, height - 4);
 
     const img = new Image();
     img.onload = () => {
-      ctx.drawImage(img, (width - 240) / 2, 24, 240, 240);
+      ctx.drawImage(img, 8, 8, 240, 240);
 
       ctx.fillStyle = '#0f172a';
       ctx.textAlign = 'center';
 
-      ctx.font = 'bold 22px Consolas, monospace';
-      ctx.fillText(label.item.barcode, width / 2, 295);
-
-      ctx.font = 'bold 18px sans-serif';
-      ctx.fillText(label.item.name.slice(0, 28), width / 2, 326);
-
-      ctx.fillStyle = '#475569';
-      ctx.font = '15px sans-serif';
-      const detailLine1 = [
-        label.item.size ? `Size: ${label.item.size}` : '',
-        label.item.color ? `Color: ${label.item.color}` : '',
-      ]
-        .filter(Boolean)
-        .join('  |  ');
-      if (detailLine1) {
-        ctx.fillText(detailLine1, width / 2, 356);
+      let y = 266;
+      if (label.item.size) {
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText(`Size: ${label.item.size}`, width / 2, y);
+        y += 22;
       }
 
-      ctx.font = 'bold 14px sans-serif';
-      ctx.fillText(`Unit: ${normalizeUnit(label.item.unit)}`, width / 2, 384);
+      if (label.item.color) {
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText(`Color: ${label.item.color}`, width / 2, y);
+      }
 
       const link = document.createElement('a');
       link.download = `QR_${label.item.barcode}.png`;
@@ -232,7 +222,7 @@ export default function QRLabelModal({
             <div>
               <h3 className="text-lg font-bold text-slate-800">{title}</h3>
               <p className="text-xs text-slate-500">
-                Product details are embedded inside each QR code — print and attach to products for quick scanning.
+                Product details are embedded inside each QR code — only Size &amp; Color are printed below.
               </p>
             </div>
           </div>
@@ -293,41 +283,32 @@ export default function QRLabelModal({
               Generating QR codes...
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="flex flex-wrap justify-center gap-4">
               {labels.map(label => (
                 <div
                   key={label.item.barcode}
-                  className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-4 flex flex-col items-center text-center shadow-xs relative group"
+                  className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-2 w-[176px] flex flex-col items-center text-center shadow-xs relative group"
                 >
                   <img
                     src={label.dataUrl}
-                    alt={`QR for ${label.item.barcode}`}
-                    className="w-40 h-40 object-contain mb-2"
+                    alt="QR Code"
+                    className="w-40 h-40 object-contain mb-1"
                   />
-                  {/* Product Details Directly Below QR */}
-                  <div className="w-full border-t border-slate-100 pt-2.5 space-y-1">
-                    <p className="font-mono font-extrabold text-slate-900 text-base tracking-wide">
-                      {label.item.barcode}
-                    </p>
-                    <p className="font-bold text-slate-800 text-sm leading-tight">
-                      {label.item.name}
-                    </p>
-                    <div className="flex flex-wrap justify-center gap-1.5 text-xs text-slate-600 pt-0.5">
+                  {/* Only Size & Color Shown Directly Below QR */}
+                  {(label.item.size || label.item.color) && (
+                    <div className="w-full pt-0.5 space-y-0.5">
                       {label.item.size && (
-                        <span className="bg-slate-100 px-2 py-0.5 rounded font-semibold">
+                        <p className="font-bold text-slate-800 text-sm leading-tight">
                           Size: {label.item.size}
-                        </span>
+                        </p>
                       )}
                       {label.item.color && (
-                        <span className="bg-slate-100 px-2 py-0.5 rounded font-semibold">
+                        <p className="font-bold text-slate-700 text-sm leading-tight">
                           Color: {label.item.color}
-                        </span>
+                        </p>
                       )}
-                      <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-bold">
-                        Unit: {normalizeUnit(label.item.unit)}
-                      </span>
                     </div>
-                  </div>
+                  )}
 
                   {/* Download Single Sticker Button */}
                   <button

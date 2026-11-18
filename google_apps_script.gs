@@ -17,6 +17,7 @@
 
 var STOCK_SHEET_NAME = 'Stock';
 var LOGS_SHEET_NAME = 'Transactions';
+var USERS_SHEET_NAME = 'Users';
 
 var STOCK_HEADERS = [
   'Unique Code',
@@ -43,6 +44,15 @@ var LOG_HEADERS = [
   'Source',
   'Done By',
   'Timestamp',
+];
+
+var USER_HEADERS = [
+  'ID',
+  'Name',
+  'Username',
+  'Password',
+  'Role',
+  'Created At',
 ];
 
 function getOrCreateSheets() {
@@ -72,7 +82,55 @@ function getOrCreateSheets() {
     logsSheet.setFrozenRows(1);
   }
 
-  return { stockSheet: stockSheet, logsSheet: logsSheet };
+  var usersSheet = ss.getSheetByName(USERS_SHEET_NAME);
+  if (!usersSheet) {
+    usersSheet = ss.insertSheet(USERS_SHEET_NAME);
+    usersSheet.appendRow(USER_HEADERS);
+    usersSheet.getRange(1, 1, 1, USER_HEADERS.length).setFontWeight('bold');
+    usersSheet.setFrozenRows(1);
+    usersSheet.appendRow([
+      'admin-default',
+      'Admin',
+      'admin',
+      'admin123',
+      'Admin',
+      Date.now(),
+    ]);
+  } else if (usersSheet.getLastRow() === 0) {
+    usersSheet.appendRow(USER_HEADERS);
+    usersSheet.getRange(1, 1, 1, USER_HEADERS.length).setFontWeight('bold');
+    usersSheet.setFrozenRows(1);
+    usersSheet.appendRow([
+      'admin-default',
+      'Admin',
+      'admin',
+      'admin123',
+      'Admin',
+      Date.now(),
+    ]);
+  }
+
+  return { stockSheet: stockSheet, logsSheet: logsSheet, usersSheet: usersSheet };
+}
+
+function readAllUsers(usersSheet) {
+  var values = usersSheet.getDataRange().getValues();
+  var users = [];
+  for (var i = 1; i < values.length; i++) {
+    var r = values[i];
+    var id = String(r[0] || '').trim();
+    var username = String(r[2] || '').trim();
+    if (!id || !username) continue;
+    users.push({
+      id: id,
+      name: String(r[1] || username).trim(),
+      username: username,
+      password: String(r[3] || ''),
+      role: String(r[4] || 'Staff').trim() === 'Admin' ? 'Admin' : 'Staff',
+      createdAt: Number(r[5]) || Date.now(),
+    });
+  }
+  return users;
 }
 
 function normalizeUnit(unit) {
@@ -86,11 +144,15 @@ function normalizeUnit(unit) {
   return 'PCS';
 }
 
+function roundQty(val) {
+  return Math.round((Number(val) || 0) * 1000) / 1000;
+}
+
 function resolveStockValue(rawStockCell, totalInVal, totalOutVal) {
   if (rawStockCell === '' || rawStockCell === null || rawStockCell === undefined) {
-    return Math.max(0, (Number(totalInVal) || 0) - (Number(totalOutVal) || 0));
+    return roundQty(Math.max(0, (Number(totalInVal) || 0) - (Number(totalOutVal) || 0)));
   }
-  return Math.max(0, Number(rawStockCell) || 0);
+  return roundQty(Math.max(0, Number(rawStockCell) || 0));
 }
 
 function readAllData() {
@@ -191,14 +253,122 @@ function doPost(e) {
     var sheets = getOrCreateSheets();
     var stockSheet = sheets.stockSheet;
     var logsSheet = sheets.logsSheet;
+    var usersSheet = sheets.usersSheet;
     var now = Date.now();
+
+    if (action === 'LOGIN') {
+      var loginUser = String(payload.username || '').trim().toLowerCase();
+      var loginPass = String(payload.password || '');
+      if (!loginUser || !loginPass) {
+        return jsonResponse({ success: false, message: 'Login ID and password are required.' });
+      }
+      var allUsers = readAllUsers(usersSheet);
+      for (var lu = 0; lu < allUsers.length; lu++) {
+        if (
+          allUsers[lu].username.toLowerCase() === loginUser &&
+          allUsers[lu].password === loginPass
+        ) {
+          return jsonResponse({
+            success: true,
+            message: 'Login successful.',
+            user: {
+              id: allUsers[lu].id,
+              name: allUsers[lu].name,
+              username: allUsers[lu].username,
+              role: allUsers[lu].role,
+            },
+          });
+        }
+      }
+      return jsonResponse({ success: false, message: 'Invalid Login ID or password.' });
+    }
+
+    if (action === 'GET_USERS') {
+      return jsonResponse({
+        success: true,
+        users: readAllUsers(usersSheet),
+      });
+    }
+
+    if (action === 'CREATE_USER') {
+      var uName = String(payload.name || '').trim();
+      var uUsername = String(payload.username || '').trim();
+      var uPassword = String(payload.password || '').trim();
+      var uRole = String(payload.role || 'Staff').trim() === 'Admin' ? 'Admin' : 'Staff';
+
+      if (!uName || !uUsername || !uPassword) {
+        return jsonResponse({
+          success: false,
+          message: 'Name, Login ID, and Password are all required.',
+        });
+      }
+
+      var currUsers = readAllUsers(usersSheet);
+      for (var cu = 0; cu < currUsers.length; cu++) {
+        if (currUsers[cu].username.toLowerCase() === uUsername.toLowerCase()) {
+          return jsonResponse({
+            success: false,
+            message: 'This Login ID already exists. Please choose another Login ID.',
+          });
+        }
+      }
+
+      usersSheet.appendRow([
+        Utilities.getUuid(),
+        uName,
+        uUsername,
+        uPassword,
+        uRole,
+        now,
+      ]);
+
+      return jsonResponse({
+        success: true,
+        message: 'User "' + uName + '" created successfully.',
+        users: readAllUsers(usersSheet),
+      });
+    }
+
+    if (action === 'DELETE_USER') {
+      var delUserId = String(payload.id || '').trim();
+      var uRows = usersSheet.getDataRange().getValues();
+      var targetUIdx = -1;
+      var adminCount = 0;
+      var targetIsAdmin = false;
+
+      for (var ur = 1; ur < uRows.length; ur++) {
+        var rowRole = String(uRows[ur][4] || '').trim();
+        if (rowRole === 'Admin') adminCount++;
+        if (String(uRows[ur][0] || '').trim() === delUserId) {
+          targetUIdx = ur + 1;
+          if (rowRole === 'Admin') targetIsAdmin = true;
+        }
+      }
+
+      if (targetUIdx === -1) {
+        return jsonResponse({ success: false, message: 'User not found.' });
+      }
+      if (targetIsAdmin && adminCount <= 1) {
+        return jsonResponse({
+          success: false,
+          message: 'Cannot delete the last Admin account.',
+        });
+      }
+
+      usersSheet.deleteRow(targetUIdx);
+      return jsonResponse({
+        success: true,
+        message: 'User deleted successfully.',
+        users: readAllUsers(usersSheet),
+      });
+    }
 
     if (action === 'SCAN_IN') {
       var barcode = String(payload.barcode || '').trim();
       var name = String(payload.name || '').trim();
       var size = String(payload.size || '').trim();
       var color = String(payload.color || '').trim();
-      var qty = Math.max(1, Number(payload.qty) || 1);
+      var qty = roundQty(Number(payload.qty) || 0);
       var unit = normalizeUnit(payload.unit);
       var source = String(payload.source || 'MANUAL');
       var doneBy = String(payload.doneBy || '').trim();
@@ -207,6 +377,12 @@ function doPost(e) {
         return jsonResponse({
           success: false,
           message: 'Unique Code and Product Name are required.',
+        });
+      }
+      if (qty <= 0) {
+        return jsonResponse({
+          success: false,
+          message: 'Quantity must be greater than 0.',
         });
       }
 
@@ -222,11 +398,11 @@ function doPost(e) {
       var savedItem;
       if (foundRowIndex !== -1) {
         var existingRow = stockData[foundRowIndex - 1];
-        var existingTotalIn = Number(existingRow[4]) || 0;
-        var existingTotalOut = Number(existingRow[5]) || 0;
+        var existingTotalIn = roundQty(Number(existingRow[4]) || 0);
+        var existingTotalOut = roundQty(Number(existingRow[5]) || 0);
         var existingStock = resolveStockValue(existingRow[6], existingTotalIn, existingTotalOut);
-        var newTotalIn = existingTotalIn + qty;
-        var newStock = existingStock + qty;
+        var newTotalIn = roundQty(existingTotalIn + qty);
+        var newStock = roundQty(existingStock + qty);
         var resolvedCode = String(existingRow[0]).trim();
         var resolvedName = name || String(existingRow[1]).trim();
         var resolvedSize = size || String(existingRow[2] || '').trim();
@@ -317,11 +493,14 @@ function doPost(e) {
 
     if (action === 'SCAN_OUT') {
       var outCode = String(payload.barcode || '').trim();
-      var outQty = Math.max(1, Number(payload.qty) || 1);
+      var outQty = roundQty(Number(payload.qty) || 0);
       var outBy = String(payload.doneBy || '').trim();
 
       if (!outCode) {
         return jsonResponse({ success: false, message: 'Product Code is required.' });
+      }
+      if (outQty <= 0) {
+        return jsonResponse({ success: false, message: 'Dispatch quantity must be greater than 0.' });
       }
 
       var sData = stockSheet.getDataRange().getValues();
@@ -341,8 +520,8 @@ function doPost(e) {
       }
 
       var currRow = sData[rowIdx - 1];
-      var currTotalIn = Number(currRow[4]) || 0;
-      var currTotalOut = Number(currRow[5]) || 0;
+      var currTotalIn = roundQty(Number(currRow[4]) || 0);
+      var currTotalOut = roundQty(Number(currRow[5]) || 0);
       var currStock = resolveStockValue(currRow[6], currTotalIn, currTotalOut);
       var currUnit = normalizeUnit(currRow[7]);
       var currName = String(currRow[1] || '').trim();
@@ -360,8 +539,8 @@ function doPost(e) {
         });
       }
 
-      var nextTotalOut = (Number(currRow[5]) || 0) + outQty;
-      var nextStock = currStock - outQty;
+      var nextTotalOut = roundQty(currTotalOut + outQty);
+      var nextStock = roundQty(Math.max(0, currStock - outQty));
 
       stockSheet
         .getRange(rowIdx, 1, 1, STOCK_HEADERS.length)
@@ -430,7 +609,8 @@ function doPost(e) {
         var eName = String(entry.name || '').trim();
         if (!eCode || !eName) continue;
 
-        var eQty = Math.max(1, Number(entry.qty) || 1);
+        var eQty = roundQty(Number(entry.qty) || 0);
+        if (eQty <= 0) eQty = 1;
         var eSize = String(entry.size || '').trim();
         var eColor = String(entry.color || '').trim();
         var eUnit = normalizeUnit(entry.unit);
@@ -440,11 +620,11 @@ function doPost(e) {
         if (codeToRowIndex[lowerCode]) {
           var targetRow = codeToRowIndex[lowerCode];
           var rowArr = stockSheet.getRange(targetRow, 1, 1, STOCK_HEADERS.length).getValues()[0];
-          var prevIn = Number(rowArr[4]) || 0;
-          var updOut = Number(rowArr[5]) || 0;
+          var prevIn = roundQty(Number(rowArr[4]) || 0);
+          var updOut = roundQty(Number(rowArr[5]) || 0);
           var prevStock = resolveStockValue(rowArr[6], prevIn, updOut);
-          var updIn = prevIn + eQty;
-          var updStock = prevStock + eQty;
+          var updIn = roundQty(prevIn + eQty);
+          var updStock = roundQty(prevStock + eQty);
           stockSheet
             .getRange(targetRow, 1, 1, STOCK_HEADERS.length)
             .setValues([
@@ -556,7 +736,9 @@ function doPost(e) {
       var nextSize = payload.size !== undefined ? String(payload.size).trim() : String(oldRow[2] || '');
       var nextColor = payload.color !== undefined ? String(payload.color).trim() : String(oldRow[3] || '');
       var nextStockVal =
-        payload.stock !== undefined ? Math.max(0, Number(payload.stock) || 0) : Number(oldRow[6]) || 0;
+        payload.stock !== undefined
+          ? roundQty(Math.max(0, Number(payload.stock) || 0))
+          : resolveStockValue(oldRow[6], oldRow[4], oldRow[5]);
       var nextUnitVal = normalizeUnit(payload.unit !== undefined ? payload.unit : oldRow[7]);
 
       stockSheet

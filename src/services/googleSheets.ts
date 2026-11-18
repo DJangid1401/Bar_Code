@@ -1,4 +1,4 @@
-import { AllowedUnit, normalizeUnit } from '../utils/qrHelper';
+import { AllowedUnit, normalizeUnit, roundQty } from '../utils/qrHelper';
 
 export type SheetStockItem = {
   barcode: string;
@@ -27,13 +27,26 @@ export type SheetTransaction = {
   timestamp: number;
 };
 
+export type SheetUser = {
+  id: string;
+  name: string;
+  username: string;
+  password?: string;
+  role: 'Admin' | 'Staff';
+  createdAt?: number;
+};
+
 export type SheetActionType =
   | 'SCAN_IN'
   | 'SCAN_OUT'
   | 'BULK_STOCK_IN'
   | 'UPDATE_ITEM'
   | 'DELETE_ITEM'
-  | 'DELETE_LOG';
+  | 'DELETE_LOG'
+  | 'LOGIN'
+  | 'GET_USERS'
+  | 'CREATE_USER'
+  | 'DELETE_USER';
 
 export type SheetApiResponse = {
   success: boolean;
@@ -43,6 +56,8 @@ export type SheetApiResponse = {
   importedItems?: SheetStockItem[];
   items?: SheetStockItem[];
   logs?: SheetTransaction[];
+  user?: SheetUser;
+  users?: SheetUser[];
 };
 
 const DEFAULT_SHEET_URL =
@@ -64,17 +79,17 @@ export function isGoogleSheetConfigured(): boolean {
 }
 
 function normalizeItem(raw: Partial<SheetStockItem>): SheetStockItem {
-  const totalIn = Number(raw.totalIn) || 0;
-  const totalOut = Number(raw.totalOut) || 0;
+  const totalIn = roundQty(Number(raw.totalIn) || 0);
+  const totalOut = roundQty(Number(raw.totalOut) || 0);
   const rawStock = raw.stock;
-  let stock = Number(rawStock) || 0;
+  let stock = roundQty(Number(rawStock) || 0);
 
   // If Remaining Stock cell was left blank on manually pasted Google Sheet rows, compute Total IN - Total OUT
   if (
     (rawStock === undefined || rawStock === null || (stock === 0 && !raw.updatedBy)) &&
     totalIn > totalOut
   ) {
-    stock = Math.max(0, totalIn - totalOut);
+    stock = roundQty(Math.max(0, totalIn - totalOut));
   }
 
   return {
@@ -99,7 +114,7 @@ function normalizeLog(raw: Partial<SheetTransaction>): SheetTransaction {
     name: String(raw.name || '').trim(),
     size: String(raw.size || '').trim(),
     color: String(raw.color || '').trim(),
-    qty: Number(raw.qty) || 1,
+    qty: roundQty(Number(raw.qty) || 0),
     unit: normalizeUnit(raw.unit),
     source: raw.source || 'MANUAL',
     doneBy: String(raw.doneBy || '').trim(),

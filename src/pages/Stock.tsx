@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useStore, StockItem } from '../store';
 import QRLabelModal from '../components/QRLabelModal';
-import { AllowedUnit, normalizeUnit } from '../utils/qrHelper';
+import { AllowedUnit, normalizeUnit, roundQty, sanitizeDecimalInput } from '../utils/qrHelper';
 import {
   Package,
   Search,
@@ -19,7 +19,9 @@ import {
 import * as XLSX from 'xlsx';
 
 export default function Stock() {
-  const { items, bulkStockIn, updateItem, deleteItem, isLoading, isSyncing } = useStore();
+  const { items, currentUser, bulkStockIn, updateItem, deleteItem, isLoading, isSyncing } =
+    useStore();
+  const isAdmin = currentUser?.role === 'Admin';
   const [search, setSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -67,7 +69,7 @@ export default function Stock() {
     );
   });
 
-  const totalStockCount = items.reduce((acc, curr) => acc + curr.stock, 0);
+  const totalStockCount = roundQty(items.reduce((acc, curr) => acc + curr.stock, 0));
 
   // Selection helpers
   const toggleSelect = (barcode: string) => {
@@ -192,7 +194,8 @@ export default function Stock() {
 
           if (!name) continue;
 
-          const qty = Math.max(1, parseInt(qtyStr) || 1);
+          const parsedQty = roundQty(parseFloat(qtyStr));
+          const qty = parsedQty > 0 ? parsedQty : 1;
           const unit = normalizeUnit(unitRaw);
 
           parsed.push({
@@ -276,7 +279,7 @@ export default function Stock() {
       return;
     }
 
-    const parsedStock = parseInt(editStock, 10);
+    const parsedStock = roundQty(parseFloat(editStock));
     if (isNaN(parsedStock) || parsedStock < 0) {
       alert('Please enter a valid stock quantity (0 or more).');
       return;
@@ -407,7 +410,7 @@ export default function Stock() {
                 <th className="p-4">Size</th>
                 <th className="p-4">Color</th>
                 <th className="p-4 text-right">Current Stock</th>
-                <th className="p-4 text-center">QR &amp; Actions</th>
+                <th className="p-4 text-center">{isAdmin ? 'QR & Actions' : 'QR'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
@@ -486,22 +489,26 @@ export default function Stock() {
                           <QrCode size={15} />
                           <span>QR</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => handleStartEdit(item)}
-                          className="text-slate-500 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition-colors cursor-pointer"
-                          title="Edit Item"
-                        >
-                          <Edit2 size={17} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingItem(item)}
-                          className="text-slate-500 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors cursor-pointer"
-                          title="Delete Item"
-                        >
-                          <Trash2 size={17} />
-                        </button>
+                        {isAdmin && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(item)}
+                              className="text-slate-500 hover:text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Item"
+                            >
+                              <Edit2 size={17} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeletingItem(item)}
+                              className="text-slate-500 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Item"
+                            >
+                              <Trash2 size={17} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -515,7 +522,7 @@ export default function Stock() {
           <div className="text-center py-16 text-slate-400 space-y-3">
             <Package size={40} className="mx-auto text-slate-300" />
             <p className="font-semibold text-slate-600">
-              {isLoading ? 'Loading stock from Google Sheet...' : 'No items found.'}
+              {isLoading ? 'Loading stock...' : 'No items found.'}
             </p>
             {!isLoading && (
               <p className="text-xs text-slate-400">
@@ -621,7 +628,7 @@ export default function Stock() {
                 <Check size={18} />
                 <span>
                   {isSyncing
-                    ? 'Uploading to Google Sheet...'
+                    ? 'Importing items...'
                     : `Confirm, Import & Generate QR (${previewItems.length})`}
                 </span>
               </button>
@@ -707,10 +714,9 @@ export default function Stock() {
                   </label>
                   <input
                     type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
+                    inputMode="decimal"
                     value={editStock}
-                    onChange={e => setEditStock(e.target.value.replace(/[^\d]/g, ''))}
+                    onChange={e => setEditStock(sanitizeDecimalInput(e.target.value))}
                     className="w-full border-2 border-slate-200 p-2.5 rounded-xl text-base font-bold text-slate-800 focus:border-blue-500 focus:outline-none"
                     required
                   />
