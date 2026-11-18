@@ -35,12 +35,8 @@ import {
   Package,
   Users,
   Calendar,
-  Search,
   Sparkles,
   Database,
-  ChevronLeft,
-  ChevronRight,
-  ShoppingBag,
 } from 'lucide-react';
 
 type AnalyticsMetric = 'OUT' | 'MOVEMENT' | 'STOCK';
@@ -379,8 +375,6 @@ function buildCombinedLineChart(
   return { data, seriesKeys: topSeries };
 }
 
-const ORDERS_PER_PAGE = 15;
-
 export default function Dashboard() {
   const { items: liveItems, logs: liveLogs, isLoading } = useStore();
   const [useDemoData, setUseDemoData] = useState<boolean>(() => getSavedDemoMode());
@@ -389,8 +383,6 @@ export default function Dashboard() {
   const [timeRange, setTimeRange] = useState<TimeRange>('365D');
   const metric: AnalyticsMetric = 'OUT';
   const trendFilter: TrendFilter = 'OUT';
-  const [orderSearch, setOrderSearch] = useState<string>('');
-  const [page, setPage] = useState<number>(1);
 
   // Generate 1-year dummy dataset only when Demo Mode is active
   const demoDataset = useMemo(
@@ -556,28 +548,6 @@ export default function Dashboard() {
     [filteredLogs, itemsByBarcode, trendFilter, timeRange]
   );
 
-  // Customer Purchase Orders (OUT logs)
-  const customerOrders = useMemo(() => {
-    const outOnly = filteredLogs.filter(l => l.type === 'OUT');
-    const q = orderSearch.trim().toLowerCase();
-    if (!q) return outOnly;
-    return outOnly.filter(
-      l =>
-        (l.customerName || '').toLowerCase().includes(q) ||
-        l.name.toLowerCase().includes(q) ||
-        (l.size || '').toLowerCase().includes(q) ||
-        (l.color || '').toLowerCase().includes(q) ||
-        l.barcode.toLowerCase().includes(q)
-    );
-  }, [filteredLogs, orderSearch]);
-
-  const totalPages = Math.max(1, Math.ceil(customerOrders.length / ORDERS_PER_PAGE));
-  const safePage = Math.min(page, totalPages);
-  const pagedOrders = useMemo(() => {
-    const start = (safePage - 1) * ORDERS_PER_PAGE;
-    return customerOrders.slice(start, start + ORDERS_PER_PAGE);
-  }, [customerOrders, safePage]);
-
   // Scoped KPI summary
   const scopedStats = useMemo(() => {
     const outLogs = filteredLogs.filter(l => l.type === 'OUT');
@@ -646,7 +616,6 @@ export default function Dashboard() {
                   setUseDemoData(true);
                   setSavedDemoMode(true);
                   setSelectedCustomer('ALL');
-                  setPage(1);
                 }}
                 className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                   useDemoData
@@ -663,7 +632,6 @@ export default function Dashboard() {
                   setUseDemoData(false);
                   setSavedDemoMode(false);
                   setSelectedCustomer('ALL');
-                  setPage(1);
                 }}
                 className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                   !useDemoData
@@ -692,10 +660,7 @@ export default function Dashboard() {
             <select
               id="dashboard-product-filter"
               value={selectedProduct}
-              onChange={e => {
-                setSelectedProduct(e.target.value);
-                setPage(1);
-              }}
+              onChange={e => setSelectedProduct(e.target.value)}
               className="bg-transparent text-sm font-bold text-slate-800 focus:outline-none cursor-pointer pr-1"
             >
               <option value="ALL">All Products</option>
@@ -719,10 +684,7 @@ export default function Dashboard() {
             <select
               id="dashboard-customer-filter"
               value={selectedCustomer}
-              onChange={e => {
-                setSelectedCustomer(e.target.value);
-                setPage(1);
-              }}
+              onChange={e => setSelectedCustomer(e.target.value)}
               className="bg-transparent text-sm font-bold text-slate-800 focus:outline-none cursor-pointer max-w-[200px]"
             >
               <option value="ALL">All Customers ({customerOptions.length})</option>
@@ -748,10 +710,7 @@ export default function Dashboard() {
               <button
                 key={r.id}
                 type="button"
-                onClick={() => {
-                  setTimeRange(r.id);
-                  setPage(1);
-                }}
+                onClick={() => setTimeRange(r.id)}
                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   timeRange === r.id
                     ? 'bg-blue-600 text-white shadow-xs'
@@ -1377,123 +1336,6 @@ export default function Dashboard() {
             )}
           </div>
         </div>
-      </div>
-
-      {/* SECTION 4: CUSTOMER PURCHASE HISTORY TABLE (1-YEAR EXPLORER) */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <div className="flex items-center gap-2">
-            <ShoppingBag className="text-blue-600" size={20} />
-            <div>
-              <h2 className="font-bold text-slate-800 text-base">
-                Customer Purchase History ({customerOrders.length.toLocaleString()} Orders)
-              </h2>
-              <p className="text-xs text-slate-500">
-                Daily customer purchases across different products, sizes &amp; colors
-              </p>
-            </div>
-          </div>
-
-          <div className="relative w-full sm:w-72">
-            <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
-            <input
-              type="text"
-              value={orderSearch}
-              onChange={e => {
-                setOrderSearch(e.target.value);
-                setPage(1);
-              }}
-              placeholder="Search customer, product, size, color..."
-              className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-blue-500"
-            />
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[720px] text-sm">
-            <thead>
-              <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-500 text-xs font-bold uppercase tracking-wider">
-                <th className="p-3.5">Date &amp; Time</th>
-                <th className="p-3.5">Customer Name</th>
-                <th className="p-3.5">Product</th>
-                <th className="p-3.5">Size</th>
-                <th className="p-3.5">Color</th>
-                <th className="p-3.5 text-right">Qty Purchased</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {pagedOrders.map(order => (
-                <tr key={order.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="p-3.5 text-xs text-slate-500 whitespace-nowrap">
-                    {new Date(order.timestamp).toLocaleString([], {
-                      day: '2-digit',
-                      month: 'short',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </td>
-                  <td className="p-3.5 font-bold text-slate-800">
-                    {order.customerName || 'Walk-in Customer'}
-                  </td>
-                  <td className="p-3.5">
-                    <span className="font-semibold text-slate-700">{order.name}</span>
-                    <span className="ml-1.5 text-[11px] font-mono text-slate-400">
-                      {order.barcode}
-                    </span>
-                  </td>
-                  <td className="p-3.5 text-xs text-slate-600">
-                    <span className="bg-slate-100 px-2 py-0.5 rounded font-semibold">
-                      {order.size || '-'}
-                    </span>
-                  </td>
-                  <td className="p-3.5 text-xs text-slate-600">
-                    <span className="bg-slate-100 px-2 py-0.5 rounded font-semibold">
-                      {formatColorLabel(order.color)}
-                    </span>
-                  </td>
-                  <td className="p-3.5 text-right font-bold text-red-600">
-                    -{order.qty} {normalizeUnit(order.unit)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {pagedOrders.length === 0 && (
-            <div className="text-center py-12 text-slate-400 text-sm">
-              No customer purchases match your filter.
-            </div>
-          )}
-        </div>
-
-        {/* Pagination Footer */}
-        {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between text-xs text-slate-600">
-            <span>
-              Page <strong>{safePage}</strong> of <strong>{totalPages}</strong> (
-              {customerOrders.length.toLocaleString()} orders)
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={safePage <= 1}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 font-semibold flex items-center gap-1 cursor-pointer"
-              >
-                <ChevronLeft size={14} /> Prev
-              </button>
-              <button
-                type="button"
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={safePage >= totalPages}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 font-semibold flex items-center gap-1 cursor-pointer"
-              >
-                Next <ChevronRight size={14} />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
