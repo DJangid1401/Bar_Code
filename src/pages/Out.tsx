@@ -5,7 +5,7 @@ import { normalizeUnit, parseScannedQR } from '../utils/qrHelper';
 import { ArrowUpFromLine, QrCode, MinusCircle, AlertCircle, Package } from 'lucide-react';
 
 export default function Out() {
-  const { items, scanOut } = useStore();
+  const { items, scanOut, isSyncing } = useStore();
   const [showScanner, setShowScanner] = useState(false);
   const [barcode, setBarcode] = useState('');
   const [qty, setQty] = useState<number>(1);
@@ -22,33 +22,33 @@ export default function Out() {
     setBarcode(parsed.barcode.trim());
   };
 
-  const handleManualOut = (e: React.FormEvent) => {
+  const handleManualOut = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedBarcode = barcode.trim();
     if (!trimmedBarcode) {
-      alert('Stock OUT karne ke liye product code dalna zaroori hai!');
+      alert('Please enter a Product Code to process Stock OUT.');
       return;
     }
 
     if (!detectedItem) {
-      alert('Error: Ye item system mein registered nahi hai!');
+      alert('Error: This product is not registered in inventory.');
       return;
     }
 
     const quantity = Number(qty);
     if (!quantity || quantity <= 0) {
-      alert('Valid quantity enter karein (kam se kam 1)!');
+      alert('Please enter a valid quantity (minimum 1).');
       return;
     }
 
     if (detectedItem.stock < quantity) {
       alert(
-        `Error: Stock kam hai! Current stock sirf ${detectedItem.stock} ${detectedUnit} hai.`
+        `Error: Insufficient stock! Current stock is only ${detectedItem.stock} ${detectedUnit}.`
       );
       return;
     }
 
-    const result = scanOut({
+    const result = await scanOut({
       barcode: trimmedBarcode,
       qty: quantity,
     });
@@ -68,7 +68,7 @@ export default function Out() {
         </div>
         <h1 className="text-3xl font-bold text-slate-800">Stock OUT (Dispatch / Sale)</h1>
         <p className="text-slate-500 text-sm">
-          Product QR scan karein ya manual product code enter karke quantity dispatch karein.
+          Scan a product QR or enter the product code manually to dispatch stock.
         </p>
       </div>
 
@@ -80,7 +80,7 @@ export default function Out() {
           className="bg-red-600 hover:bg-red-700 text-white text-base font-bold py-3.5 px-6 rounded-xl w-full flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer"
         >
           <QrCode size={22} />
-          <span>1 Scan QR / Barcode</span>
+          <span>Scan QR / Barcode</span>
         </button>
 
         <div className="flex items-center gap-4 text-slate-400">
@@ -136,7 +136,7 @@ export default function Out() {
         ) : barcode.trim() ? (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 text-sm flex items-center gap-2">
             <AlertCircle size={18} className="text-amber-600 shrink-0" />
-            <span>Ye product code system mein register nahi hai. Pehle Stock IN karein.</span>
+            <span>This product code is not registered in inventory. Please add it via Stock IN first.</span>
           </div>
         ) : null}
 
@@ -150,7 +150,7 @@ export default function Out() {
               type="text"
               value={barcode}
               onChange={e => setBarcode(e.target.value)}
-              placeholder="QR scan karein ya code type karein (e.g. PRD-T001)"
+              placeholder="Scan QR or enter product code (e.g. PRD-T001)"
               className="w-full border-2 border-slate-200 p-3 rounded-xl text-base font-mono focus:border-red-500 focus:outline-none"
               required
             />
@@ -172,19 +172,19 @@ export default function Out() {
             />
             {detectedItem && detectedItem.stock < qty && (
               <p className="text-xs text-red-500 mt-1">
-                Requested quantity available stock ({detectedItem.stock} {detectedUnit}) se zyada hai!
+                Requested quantity exceeds available stock ({detectedItem.stock} {detectedUnit}).
               </p>
             )}
           </div>
 
           <button
             type="submit"
-            disabled={!barcode.trim() || !detectedItem || detectedItem.stock < qty}
+            disabled={isSyncing || !barcode.trim() || !detectedItem || detectedItem.stock < qty}
             className="bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-xl w-full flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer"
           >
             <MinusCircle size={22} />
             <span>
-              Process Stock OUT (-{qty} {detectedUnit})
+              {isSyncing ? 'Updating Google Sheet...' : `Process Stock OUT (-${qty} ${detectedUnit})`}
             </span>
           </button>
         </form>

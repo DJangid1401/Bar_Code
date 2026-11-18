@@ -6,7 +6,7 @@ import { AllowedUnit, normalizeUnit, parseScannedQR } from '../utils/qrHelper';
 import { ArrowDownToLine, QrCode, PlusCircle, CheckCircle, Printer } from 'lucide-react';
 
 export default function In() {
-  const { items, scanIn } = useStore();
+  const { items, scanIn, isSyncing } = useStore();
   const [showScanner, setShowScanner] = useState(false);
   const [barcode, setBarcode] = useState('');
   const [name, setName] = useState('');
@@ -57,26 +57,26 @@ export default function In() {
     }
   };
 
-  const handleManualIn = (e: React.FormEvent) => {
+  const handleManualIn = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!barcode.trim()) {
-      alert('Product Code / Unique Code manually enter ya scan karein!');
+      alert('Please enter or scan a Unique Product Code.');
       return;
     }
 
     if (!name.trim()) {
-      alert('Product Name dalna zaroori hai!');
+      alert('Product Name is required.');
       return;
     }
 
     const quantity = Number(qty);
     if (!quantity || quantity <= 0) {
-      alert('Valid Quantity enter karein (kam se kam 1)!');
+      alert('Please enter a valid quantity (minimum 1).');
       return;
     }
 
-    const result = scanIn({
+    const result = await scanIn({
       barcode: barcode.trim(),
       name: name.trim(),
       size: size.trim(),
@@ -110,7 +110,7 @@ export default function In() {
         </div>
         <h1 className="text-3xl font-bold text-slate-800">Stock IN (Inward)</h1>
         <p className="text-slate-500 text-sm">
-          QR/Barcode scan karein ya apna manual Product Code enter karein, phir details & quantity submit karein.
+          Scan a QR/Barcode or enter a Product Code manually, then fill in the details and quantity.
         </p>
       </div>
 
@@ -122,7 +122,7 @@ export default function In() {
               QR Ready: {lastSavedItem.name} ({lastSavedItem.barcode})
             </p>
             <p className="text-xs text-emerald-700">
-              Is product ka printable QR label turant print ya download karein.
+              Print or download the printable QR label for this product.
             </p>
           </div>
           <button
@@ -144,13 +144,13 @@ export default function In() {
           className="bg-green-600 hover:bg-green-700 text-white text-base font-bold py-3.5 px-6 rounded-xl w-full flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer"
         >
           <QrCode size={22} />
-          <span>1 Scan QR / Barcode</span>
+          <span>Scan QR / Barcode</span>
         </button>
 
         <div className="flex items-center gap-4 text-slate-400">
           <div className="flex-1 h-px bg-slate-200"></div>
           <span className="text-xs font-bold tracking-wider uppercase text-slate-400">
-            Manual Product Code & Details
+            Manual Product Code &amp; Details
           </span>
           <div className="flex-1 h-px bg-slate-200"></div>
         </div>
@@ -166,7 +166,7 @@ export default function In() {
                 <span className="font-bold">
                   {detectedItem.stock} {normalizeUnit(detectedItem.unit)}
                 </span>
-                . Entered quantity is stock me add ho jayegi.
+                . The entered quantity will be added to this stock.
               </p>
             </div>
           </div>
@@ -177,7 +177,7 @@ export default function In() {
           {/* Manual Unique Code / Barcode */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">
-              Unique Product Code (Manual) *
+              Unique Product Code *
             </label>
             <input
               type="text"
@@ -186,7 +186,7 @@ export default function In() {
                 setBarcode(e.target.value);
                 setLastScanned(null);
               }}
-              placeholder="Apna Product Code type karein (e.g. PRD-T001)"
+              placeholder="Enter product code (e.g. PRD-T001)"
               className="w-full border-2 border-slate-200 p-3 rounded-xl text-base font-mono focus:border-green-500 focus:outline-none"
               required
             />
@@ -264,16 +264,20 @@ export default function In() {
               >
                 <option value="PCS">PCS</option>
                 <option value="KGS">KGS</option>
+                <option value="PAC">PAC</option>
               </select>
             </div>
           </div>
 
           <button
             type="submit"
-            className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 px-6 rounded-xl w-full flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer mt-2"
+            disabled={isSyncing}
+            className="bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-xl w-full flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer mt-2"
           >
             <PlusCircle size={22} />
-            <span>Submit Stock IN (+{qty} {unit})</span>
+            <span>
+              {isSyncing ? 'Saving to Google Sheet...' : `Submit Stock IN (+${qty} ${unit})`}
+            </span>
           </button>
         </form>
       </div>

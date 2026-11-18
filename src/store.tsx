@@ -1,30 +1,15 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import {
+  fetchGoogleSheetData,
+  postGoogleSheetAction,
+  isGoogleSheetConfigured,
+  SheetStockItem,
+  SheetTransaction,
+} from './services/googleSheets';
 import { AllowedUnit, normalizeUnit } from './utils/qrHelper';
 
-export type Transaction = {
-  id: string;
-  type: 'IN' | 'OUT';
-  barcode: string;
-  name: string;
-  size?: string;
-  color?: string;
-  qty: number;
-  unit?: AllowedUnit;
-  source?: 'SCAN' | 'MANUAL' | 'EXCEL_IMPORT';
-  timestamp: number;
-};
-
-export type StockItem = {
-  barcode: string;
-  name: string;
-  size: string;
-  color: string;
-  stock: number;
-  unit: AllowedUnit;
-  createdAt?: number;
-  updatedAt?: number;
-};
+export type Transaction = SheetTransaction;
+export type StockItem = SheetStockItem;
 
 export type ScanInPayload = {
   barcode: string;
@@ -41,17 +26,38 @@ export type ScanOutPayload = {
   qty?: number;
 };
 
+function extractError(err: unknown, fallback: string): string {
+  if (err instanceof Error) {
+    if (err.name === 'AbortError') {
+      return 'Request timed out. Google Sheet did not respond in time. Please try again.';
+    }
+    if (err.message === 'Failed to fetch') {
+      return 'Could not connect to Google Sheet (CORS blocked). Ensure Apps Script is deployed with "Who has access: Anyone" and a New version is published.';
+    }
+    return err.message;
+  }
+  return err ? String(err) : fallback;
+}
+
 interface AppState {
   items: StockItem[];
   logs: Transaction[];
+  isLoading: boolean;
+  isSyncing: boolean;
+  lastSyncedAt: number | null;
+  error: string | null;
+  isConfigured: boolean;
+  clearError: () => void;
+  fetchData: (silent?: boolean) => Promise<void>;
+  startAutoSync: (intervalMs?: number) => () => void;
   scanIn: (
     payloadOrBarcode: ScanInPayload | string,
     fallbackName?: string
-  ) => { success: boolean; message: string; item?: StockItem };
+  ) => Promise<{ success: boolean; message: string; item?: StockItem }>;
   scanOut: (
     payloadOrBarcode: ScanOutPayload | string,
     fallbackQty?: number
-  ) => { success: boolean; message: string };
+  ) => Promise<{ success: boolean; message: string }>;
   bulkStockIn: (
     entries: Array<{
       barcode: string;
@@ -61,282 +67,327 @@ interface AppState {
       qty: number;
       unit?: string;
     }>
-  ) => { count: number; message: string; importedItems: StockItem[] };
+  ) => Promise<{ count: number; message: string; importedItems: StockItem[] }>;
   updateItem: (
     barcode: string,
     updatedData: Partial<Omit<StockItem, 'barcode'>>
-  ) => { success: boolean; message: string };
-  deleteItem: (barcode: string) => { success: boolean; message: string };
-  deleteLog: (id: string) => { success: boolean; message: string };
+  ) => Promise<{ success: boolean; message: string }>;
+  deleteItem: (barcode: string) => Promise<{ success: boolean; message: string }>;
+  deleteLog: (id: string) => Promise<{ success: boolean; message: string }>;
 }
 
-export const useStore = create<AppState>()(
-  persist(
-    (set, get) => ({
-      items: [],
-      logs: [],
+export const useStore = create<AppState>()((set, get) => ({
+  items: [],
+  logs: [],
+  isLoading: false,
+  isSyncing: false,
+  lastSyncedAt: null,
+  error: null,
+  isConfigured: isGoogleSheetConfigured(),
 
-      scanIn: (payloadOrBarcode, fallbackName) => {
-        let barcode = '';
-        let name = '';
-        let qty = 1;
-        let size = '';
-        let color = '';
-        let unit: AllowedUnit = 'PCS';
-        let source: 'SCAN' | 'MANUAL' | 'EXCEL_IMPORT' = 'MANUAL';
+  clearError: () => set({ error: null }),
 
-        if (typeof payloadOrBarcode === 'string') {
-          barcode = payloadOrBarcode.trim();
-          name = (fallbackName || '').trim();
-        } else {
-          barcode = (payloadOrBarcode.barcode || '').trim();
-          name = (payloadOrBarcode.name || '').trim();
-          qty = Number(payloadOrBarcode.qty) > 0 ? Number(payloadOrBarcode.qty) : 1;
-          size = (payloadOrBarcode.size || '').trim();
-          color = (payloadOrBarcode.color || '').trim();
-          unit = normalizeUnit(payloadOrBarcode.unit);
-          source = payloadOrBarcode.source || 'MANUAL';
-        }
+  fetchData: async (silent = false) => {
+    if (!isGoogleSheetConfigured()) {
+      set({
+        isLoading: false,
+        isConfigured: false,
+        error:
+          'Google Sheet Web App URL is not configured. Please add VITE_GOOGLE_SHEET_URL in .env.local.',
+      });
+      return;
+    }
 
-        if (!barcode) return { success: false, message: 'Manual Product Code / Unique Code dalna zaroori hai!' };
-        if (!name) return { success: false, message: 'Product Name dalna zaroori hai!' };
+    if (!silent) {
+      set({ isLoading: true, error: null });
+    }
 
-        const { items, logs } = get();
-        const existing = items.find(
-          i => i.barcode.toLowerCase() === barcode.toLowerCase()
-        );
-        const now = Date.now();
+    try {
+      const { items, logs } = await fetchGoogleSheetData();
+      set({
+        items,
+        logs,
+        isLoading: false,
+        isConfigured: true,
+        lastSyncedAt: Date.now(),
+        error: null,
+      });
+    } catch (err) {
+      const message = extractError(err, 'Failed to load data from Google Sheet.');
+      console.error('Google Sheets fetchData error:', err);
+      set({
+        isLoading: false,
+        error: message,
+      });
+    }
+  },
 
-        let savedItem: StockItem;
-        let newItems: StockItem[];
-        if (existing) {
-          savedItem = {
-            ...existing,
-            name: name || existing.name,
-            size: size || existing.size || '',
-            color: color || existing.color || '',
-            unit: normalizeUnit(unit || existing.unit),
-            stock: existing.stock + qty,
-            updatedAt: now,
-          };
-          newItems = items.map(i =>
-            i.barcode.toLowerCase() === barcode.toLowerCase() ? savedItem : i
-          );
-        } else {
-          savedItem = {
-            barcode,
-            name,
-            size: size || '',
-            color: color || '',
-            stock: qty,
-            unit,
-            createdAt: now,
-            updatedAt: now,
-          };
-          newItems = [...items, savedItem];
-        }
+  startAutoSync: (intervalMs = 15000) => {
+    if (!isGoogleSheetConfigured()) return () => {};
 
-        const newLog: Transaction = {
-          id: now.toString() + Math.random().toString(36).substring(2, 6),
-          type: 'IN',
-          barcode: savedItem.barcode,
-          name: savedItem.name,
-          size: savedItem.size,
-          color: savedItem.color,
-          qty,
-          unit: savedItem.unit,
-          source,
-          timestamp: now,
-        };
+    const timer = window.setInterval(() => {
+      const state = get();
+      if (document.visibilityState === 'visible' && !state.isSyncing && !state.isLoading) {
+        state.fetchData(true);
+      }
+    }, intervalMs);
 
-        set({ items: newItems, logs: [newLog, ...logs] });
-        return {
-          success: true,
-          message: `Success: +${qty} ${savedItem.unit} ${savedItem.name} Stock IN Done!`,
-          item: savedItem,
-        };
-      },
+    return () => {
+      window.clearInterval(timer);
+    };
+  },
 
-      scanOut: (payloadOrBarcode, fallbackQty) => {
-        let barcode = '';
-        let qty = 1;
+  scanIn: async (payloadOrBarcode, fallbackName) => {
+    if (!isGoogleSheetConfigured()) {
+      return {
+        success: false,
+        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
+      };
+    }
 
-        if (typeof payloadOrBarcode === 'string') {
-          barcode = payloadOrBarcode.trim();
-          qty = Number(fallbackQty) > 0 ? Number(fallbackQty) : 1;
-        } else {
-          barcode = (payloadOrBarcode.barcode || '').trim();
-          qty = Number(payloadOrBarcode.qty) > 0 ? Number(payloadOrBarcode.qty) : 1;
-        }
+    let barcode = '';
+    let name = '';
+    let qty = 1;
+    let size = '';
+    let color = '';
+    let unit: AllowedUnit = 'PCS';
+    let source: 'SCAN' | 'MANUAL' | 'EXCEL_IMPORT' = 'MANUAL';
 
-        if (!barcode) return { success: false, message: 'Product Code dalna zaroori hai!' };
+    if (typeof payloadOrBarcode === 'string') {
+      barcode = payloadOrBarcode.trim();
+      name = (fallbackName || '').trim();
+    } else {
+      barcode = (payloadOrBarcode.barcode || '').trim();
+      name = (payloadOrBarcode.name || '').trim();
+      qty = Number(payloadOrBarcode.qty) > 0 ? Number(payloadOrBarcode.qty) : 1;
+      size = (payloadOrBarcode.size || '').trim();
+      color = (payloadOrBarcode.color || '').trim();
+      unit = normalizeUnit(payloadOrBarcode.unit);
+      source = payloadOrBarcode.source || 'MANUAL';
+    }
 
-        const { items, logs } = get();
-        const existing = items.find(
-          i => i.barcode.toLowerCase() === barcode.toLowerCase()
-        );
-        if (!existing) {
-          return { success: false, message: 'Error: Ye item system mein nahi hai!' };
-        }
+    if (!barcode) {
+      return { success: false, message: 'Unique Product Code is required.' };
+    }
+    if (!name) {
+      return { success: false, message: 'Product Name is required.' };
+    }
 
-        const unit = normalizeUnit(existing.unit);
+    set({ isSyncing: true, error: null });
+    try {
+      const res = await postGoogleSheetAction('SCAN_IN', {
+        barcode,
+        name,
+        qty,
+        size,
+        color,
+        unit,
+        source,
+      });
 
-        if (existing.stock < qty) {
-          return {
-            success: false,
-            message: `Error: Stock kam hai! Available: ${existing.stock} ${unit}, Requested: ${qty}`,
-          };
-        }
+      set({
+        items: res.items ?? get().items,
+        logs: res.logs ?? get().logs,
+        lastSyncedAt: Date.now(),
+        isSyncing: false,
+      });
 
-        const now = Date.now();
-        const newItems = items.map(i =>
-          i.barcode.toLowerCase() === barcode.toLowerCase()
-            ? { ...i, stock: i.stock - qty, unit, updatedAt: now }
-            : i
-        );
+      return {
+        success: true,
+        message: `Success: +${qty} ${unit} of "${name}" added to Stock IN.`,
+        item: res.item,
+      };
+    } catch (err) {
+      const message = extractError(err, 'Failed to save Stock IN entry.');
+      console.error('Google Sheets scanIn error:', err);
+      set({ isSyncing: false, error: message });
+      return { success: false, message: `Error: ${message}` };
+    }
+  },
 
-        const newLog: Transaction = {
-          id: now.toString() + Math.random().toString(36).substring(2, 6),
-          type: 'OUT',
-          barcode: existing.barcode,
-          name: existing.name,
-          size: existing.size,
-          color: existing.color,
-          qty,
-          unit,
-          source: 'MANUAL',
-          timestamp: now,
-        };
+  scanOut: async (payloadOrBarcode, fallbackQty) => {
+    if (!isGoogleSheetConfigured()) {
+      return {
+        success: false,
+        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
+      };
+    }
 
-        set({ items: newItems, logs: [newLog, ...logs] });
-        return {
-          success: true,
-          message: `Success: -${qty} ${unit} ${existing.name} OUT ho gaya!`,
-        };
-      },
+    let barcode = '';
+    let qty = 1;
 
-      bulkStockIn: entries => {
-        const { items, logs } = get();
-        const currentItems = [...items];
-        const newLogs: Transaction[] = [];
-        const importedMap = new Map<string, StockItem>();
-        const now = Date.now();
-        let processedCount = 0;
+    if (typeof payloadOrBarcode === 'string') {
+      barcode = payloadOrBarcode.trim();
+      qty = Number(fallbackQty) > 0 ? Number(fallbackQty) : 1;
+    } else {
+      barcode = (payloadOrBarcode.barcode || '').trim();
+      qty = Number(payloadOrBarcode.qty) > 0 ? Number(payloadOrBarcode.qty) : 1;
+    }
 
-        for (let idx = 0; idx < entries.length; idx++) {
-          const entry = entries[idx];
-          const barcode = (entry.barcode || '').trim();
-          const name = (entry.name || '').trim();
-          // Strict manual code requirement: skip if barcode or name missing
-          if (!barcode || !name) continue;
+    if (!barcode) {
+      return { success: false, message: 'Unique Product Code is required.' };
+    }
 
-          const qty = Number(entry.qty) > 0 ? Number(entry.qty) : 1;
-          const size = (entry.size || '').trim();
-          const color = (entry.color || '').trim();
-          const unit = normalizeUnit(entry.unit);
+    set({ isSyncing: true, error: null });
+    try {
+      const res = await postGoogleSheetAction('SCAN_OUT', {
+        barcode,
+        qty,
+      });
 
-          const existingIndex = currentItems.findIndex(
-            i => i.barcode.toLowerCase() === barcode.toLowerCase()
-          );
+      set({
+        items: res.items ?? get().items,
+        logs: res.logs ?? get().logs,
+        lastSyncedAt: Date.now(),
+        isSyncing: false,
+      });
 
-          let savedItem: StockItem;
-          if (existingIndex >= 0) {
-            const existing = currentItems[existingIndex];
-            savedItem = {
-              ...existing,
-              name: name || existing.name,
-              size: size || existing.size || '',
-              color: color || existing.color || '',
-              unit: normalizeUnit(unit || existing.unit),
-              stock: existing.stock + qty,
-              updatedAt: now + idx,
-            };
-            currentItems[existingIndex] = savedItem;
-          } else {
-            savedItem = {
-              barcode,
-              name,
-              size,
-              color,
-              stock: qty,
-              unit,
-              createdAt: now + idx,
-              updatedAt: now + idx,
-            };
-            currentItems.push(savedItem);
-          }
+      return {
+        success: true,
+        message: `Success: -${qty} dispatched from stock.`,
+      };
+    } catch (err) {
+      const message = extractError(err, 'Failed to save Stock OUT entry.');
+      console.error('Google Sheets scanOut error:', err);
+      set({ isSyncing: false, error: message });
+      return { success: false, message: `Error: ${message}` };
+    }
+  },
 
-          importedMap.set(savedItem.barcode.toLowerCase(), savedItem);
+  bulkStockIn: async entries => {
+    if (!isGoogleSheetConfigured()) {
+      return {
+        count: 0,
+        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
+        importedItems: [],
+      };
+    }
 
-          newLogs.push({
-            id: (now + idx).toString() + Math.random().toString(36).substring(2, 6),
-            type: 'IN',
-            barcode: savedItem.barcode,
-            name: savedItem.name,
-            size: savedItem.size,
-            color: savedItem.color,
-            qty,
-            unit: savedItem.unit,
-            source: 'EXCEL_IMPORT',
-            timestamp: now + idx,
-          });
+    set({ isSyncing: true, error: null });
+    try {
+      const res = await postGoogleSheetAction('BULK_STOCK_IN', {
+        entries,
+      });
 
-          processedCount++;
-        }
+      set({
+        items: res.items ?? get().items,
+        logs: res.logs ?? get().logs,
+        lastSyncedAt: Date.now(),
+        isSyncing: false,
+      });
 
-        set({ items: currentItems, logs: [...newLogs.reverse(), ...logs] });
-        return {
-          count: processedCount,
-          message: `Success: ${processedCount} items Excel/CSV se Stock IN ho gaye! QR codes ready hain.`,
-          importedItems: Array.from(importedMap.values()),
-        };
-      },
+      const count = res.count ?? (res.importedItems?.length || 0);
+      return {
+        count,
+        message: `Success: ${count} item(s) imported into Google Sheet as Stock IN.`,
+        importedItems: res.importedItems || [],
+      };
+    } catch (err) {
+      const message = extractError(err, 'Failed to import Excel/CSV into Google Sheet.');
+      console.error('Google Sheets bulkStockIn error:', err);
+      set({ isSyncing: false, error: message });
+      return {
+        count: 0,
+        message: `Error: ${message}`,
+        importedItems: [],
+      };
+    }
+  },
 
-      updateItem: (barcode, updatedData) => {
-        const { items } = get();
-        const existing = items.find(i => i.barcode === barcode);
-        if (!existing) return { success: false, message: 'Item not found!' };
+  updateItem: async (barcode, updatedData) => {
+    if (!isGoogleSheetConfigured()) {
+      return {
+        success: false,
+        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
+      };
+    }
 
-        const newItems = items.map(i =>
-          i.barcode === barcode
-            ? {
-                ...i,
-                ...updatedData,
-                unit: normalizeUnit(updatedData.unit ?? i.unit),
-                stock:
-                  typeof updatedData.stock === 'number'
-                    ? Math.max(0, updatedData.stock)
-                    : i.stock,
-                updatedAt: Date.now(),
-              }
-            : i
-        );
+    set({ isSyncing: true, error: null });
+    try {
+      const res = await postGoogleSheetAction('UPDATE_ITEM', {
+        barcode,
+        ...updatedData,
+        unit: updatedData.unit ? normalizeUnit(updatedData.unit) : undefined,
+      });
 
-        set({ items: newItems });
-        return {
-          success: true,
-          message: `Product "${existing.name}" successfully update ho gaya!`,
-        };
-      },
+      set({
+        items: res.items ?? get().items,
+        logs: res.logs ?? get().logs,
+        lastSyncedAt: Date.now(),
+        isSyncing: false,
+      });
 
-      deleteItem: barcode => {
-        const { items } = get();
-        const existing = items.find(i => i.barcode === barcode);
-        if (!existing) return { success: false, message: 'Item not found!' };
+      return {
+        success: true,
+        message: 'Product updated successfully.',
+      };
+    } catch (err) {
+      const message = extractError(err, 'Failed to update product.');
+      console.error('Google Sheets updateItem error:', err);
+      set({ isSyncing: false, error: message });
+      return { success: false, message: `Error: ${message}` };
+    }
+  },
 
-        set({ items: items.filter(i => i.barcode !== barcode) });
-        return {
-          success: true,
-          message: `Product "${existing.name}" inventory se delete ho gaya.`,
-        };
-      },
+  deleteItem: async barcode => {
+    if (!isGoogleSheetConfigured()) {
+      return {
+        success: false,
+        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
+      };
+    }
 
-      deleteLog: id => {
-        const { logs } = get();
-        set({ logs: logs.filter(l => l.id !== id) });
-        return { success: true, message: 'Log delete ho gaya.' };
-      },
-    }),
-    { name: 'simple-qr-inventory' }
-  )
-);
+    set({ isSyncing: true, error: null });
+    try {
+      const res = await postGoogleSheetAction('DELETE_ITEM', { barcode });
+
+      set({
+        items: res.items ?? get().items,
+        logs: res.logs ?? get().logs,
+        lastSyncedAt: Date.now(),
+        isSyncing: false,
+      });
+
+      return {
+        success: true,
+        message: 'Product deleted from inventory.',
+      };
+    } catch (err) {
+      const message = extractError(err, 'Failed to delete product.');
+      console.error('Google Sheets deleteItem error:', err);
+      set({ isSyncing: false, error: message });
+      return { success: false, message: `Error: ${message}` };
+    }
+  },
+
+  deleteLog: async id => {
+    if (!isGoogleSheetConfigured()) {
+      return {
+        success: false,
+        message: 'Google Sheet URL is not configured. Please set VITE_GOOGLE_SHEET_URL in .env.local.',
+      };
+    }
+
+    set({ isSyncing: true, error: null });
+    try {
+      const res = await postGoogleSheetAction('DELETE_LOG', { id });
+
+      set({
+        items: res.items ?? get().items,
+        logs: res.logs ?? get().logs,
+        lastSyncedAt: Date.now(),
+        isSyncing: false,
+      });
+
+      return {
+        success: true,
+        message: 'Transaction log deleted.',
+      };
+    } catch (err) {
+      const message = extractError(err, 'Failed to delete transaction log.');
+      console.error('Google Sheets deleteLog error:', err);
+      set({ isSyncing: false, error: message });
+      return { success: false, message: `Error: ${message}` };
+    }
+  },
+}));

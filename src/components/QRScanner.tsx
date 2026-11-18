@@ -165,7 +165,7 @@ export default function QRScanner({ onScanSuccess, onClose }: QRScannerProps) {
       }
     } catch (err) {
       console.error("Scan file error:", err);
-      alert("Barcode / QR code image mein detect nahi hua. Please clear image upload karein.");
+      alert("No barcode or QR code detected in the image. Please upload a clear photo.");
     } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';

@@ -52,7 +52,7 @@ export default function QRLabelModal({
   const handlePrint = () => {
     const printWindow = window.open('', '_blank', 'width=900,height=700');
     if (!printWindow) {
-      alert('Popup blocked! Kripya browser me popup allow karein print karne ke liye.');
+      alert('Popup blocked! Please allow popups in your browser to print QR labels.');
       return;
     }
 
@@ -231,7 +231,7 @@ export default function QRLabelModal({
             <div>
               <h3 className="text-lg font-bold text-slate-800">{title}</h3>
               <p className="text-xs text-slate-500">
-                QR ke andar product details embedded hain — print karke product par lagayein aur direct scan karein.
+                Product details are embedded inside each QR code — print and attach to products for quick scanning.
               </p>
             </div>
           </div>

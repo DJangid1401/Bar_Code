@@ -19,7 +19,7 @@ import {
 import * as XLSX from 'xlsx';
 
 export default function Stock() {
-  const { items, bulkStockIn, updateItem, deleteItem } = useStore();
+  const { items, bulkStockIn, updateItem, deleteItem, isLoading, isSyncing } = useStore();
   const [search, setSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -95,7 +95,7 @@ export default function Stock() {
         : filteredItems;
 
     if (targetItems.length === 0) {
-      alert('Print karne ke liye koi product available nahi hai.');
+      alert('No products available to print.');
       return;
     }
 
@@ -107,7 +107,7 @@ export default function Stock() {
     setQrModalItems(targetItems);
   };
 
-  // Download Sample Template (Manual Unique Code + PCS / KGS only)
+  // Download Sample Template (Manual Unique Code + PCS / KGS / PAC)
   const handleDownloadSample = () => {
     const sampleData = [
       {
@@ -124,7 +124,7 @@ export default function Stock() {
         Size: '14 inch',
         Color: 'Red',
         Qty: 25,
-        Unit: 'PCS',
+        Unit: 'PAC',
       },
       {
         'Unique Code': 'PRD-R001',
@@ -161,7 +161,7 @@ export default function Stock() {
         });
 
         if (!rows || rows.length === 0) {
-          alert('Excel / CSV file empty hai ya data rows nahi mili!');
+          alert('The Excel / CSV file is empty or contains no data rows.');
           return;
         }
 
@@ -183,11 +183,11 @@ export default function Stock() {
           const qtyStr = findVal(['qty', 'quantity', 'stock', 'count', 'units']);
           const unitRaw = findVal(['unit', 'uom']);
 
-          if (!name && !barcode) continue; // completely empty row
+          if (!name && !barcode) continue;
 
           if (!barcode) {
             missingCodeCount++;
-            continue; // Manual Unique Code is mandatory; do not auto-generate
+            continue;
           }
 
           if (!name) continue;
@@ -208,8 +208,8 @@ export default function Stock() {
         if (parsed.length === 0) {
           alert(
             missingCodeCount > 0
-              ? `${missingCodeCount} rows mein Unique Code missing hai. Kripya Excel sheet mein apna manual Unique Code (jaise PRD-T001) add karein.`
-              : 'File se koi valid products detect nahi hue. Columns check karein: Unique Code, Product Name, Size, Color, Qty, Unit (PCS/KGS).'
+              ? `${missingCodeCount} row(s) are missing a Unique Code. Please enter a manual Unique Code (e.g. PRD-T001) in your Excel sheet.`
+              : 'No valid products detected in the file. Expected columns: Unique Code, Product Name, Size, Color, Qty, Unit (PCS / KGS / PAC).'
           );
           return;
         }
@@ -220,7 +220,7 @@ export default function Stock() {
       } catch (err: unknown) {
         console.error('File parsing error:', err);
         const message = err instanceof Error ? err.message : String(err);
-        alert(`File read karne mein error aayi: ${message}`);
+        alert(`Error reading file: ${message}`);
       } finally {
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
@@ -231,11 +231,16 @@ export default function Stock() {
     reader.readAsArrayBuffer(file);
   };
 
-  // Confirm and Execute Bulk Import -> Automatically Open Printable QR Labels!
-  const handleConfirmImport = () => {
-    if (previewItems.length === 0) return;
+  // Confirm and Execute Bulk Import -> Automatically Open Printable QR Labels
+  const handleConfirmImport = async () => {
+    if (previewItems.length === 0 || isSyncing) return;
 
-    const result = bulkStockIn(previewItems);
+    const result = await bulkStockIn(previewItems);
+    if (result.count === 0) {
+      alert(result.message);
+      return;
+    }
+
     setShowPreviewModal(false);
     setPreviewItems([]);
     setSkippedMissingCodeCount(0);
@@ -262,16 +267,16 @@ export default function Stock() {
   };
 
   // Save Edit
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingItem) return;
+    if (!editingItem || isSyncing) return;
 
     if (!editName.trim()) {
-      alert('Product Name empty nahi ho sakta!');
+      alert('Product Name cannot be empty.');
       return;
     }
 
-    const result = updateItem(editingItem.barcode, {
+    const result = await updateItem(editingItem.barcode, {
       name: editName.trim(),
       size: editSize.trim(),
       color: editColor.trim(),
@@ -286,10 +291,12 @@ export default function Stock() {
   };
 
   // Confirm Delete
-  const handleConfirmDelete = () => {
-    if (!deletingItem) return;
-    const result = deleteItem(deletingItem.barcode);
-    setSelectedBarcodes(prev => prev.filter(b => b !== deletingItem.barcode));
+  const handleConfirmDelete = async () => {
+    if (!deletingItem || isSyncing) return;
+    const result = await deleteItem(deletingItem.barcode);
+    if (result.success) {
+      setSelectedBarcodes(prev => prev.filter(b => b !== deletingItem.barcode));
+    }
     alert(result.message);
     setDeletingItem(null);
   };
@@ -304,7 +311,7 @@ export default function Stock() {
             Full Stock List
           </h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            Excel/CSV Stock IN, auto-generated printable QR codes, aur live stock management.
+            Excel/CSV Stock IN, auto-generated printable QR codes, and live stock management.
           </p>
         </div>
 
@@ -394,7 +401,7 @@ export default function Stock() {
                 <th className="p-4">Size</th>
                 <th className="p-4">Color</th>
                 <th className="p-4 text-right">Current Stock</th>
-                <th className="p-4 text-center">QR & Actions</th>
+                <th className="p-4 text-center">QR &amp; Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
@@ -501,10 +508,14 @@ export default function Stock() {
         {filteredItems.length === 0 && (
           <div className="text-center py-16 text-slate-400 space-y-3">
             <Package size={40} className="mx-auto text-slate-300" />
-            <p className="font-semibold text-slate-600">Koi item nahi mila.</p>
-            <p className="text-xs text-slate-400">
-              Stock IN page se item add karein ya upar se Excel / CSV file upload karein.
+            <p className="font-semibold text-slate-600">
+              {isLoading ? 'Loading stock from Google Sheet...' : 'No items found.'}
             </p>
+            {!isLoading && (
+              <p className="text-xs text-slate-400">
+                Add products from the Stock IN page or upload an Excel / CSV file above.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -537,7 +548,7 @@ export default function Stock() {
                   Valid Items Ready for Import: {previewItems.length}
                 </span>
                 <span className="text-xs text-green-700 font-medium">
-                  Import ke baad sabhi items ke printable QR codes auto-generate ho jayenge.
+                  Printable QR labels will be automatically generated after import.
                 </span>
               </div>
 
@@ -545,8 +556,8 @@ export default function Stock() {
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 flex items-center gap-2">
                   <AlertCircle size={16} className="text-amber-600 shrink-0" />
                   <span>
-                    <strong>{skippedMissingCodeCount} row(s)</strong> skip kar di gayi kyunki unme
-                    manual <strong>Unique Code</strong> blank tha.
+                    <strong>{skippedMissingCodeCount} row(s)</strong> skipped because the manual{' '}
+                    <strong>Unique Code</strong> was blank.
                   </span>
                 </div>
               )}
@@ -598,10 +609,15 @@ export default function Stock() {
               <button
                 type="button"
                 onClick={handleConfirmImport}
-                className="px-6 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white font-bold transition-colors cursor-pointer shadow-md text-sm flex items-center gap-2"
+                disabled={isSyncing}
+                className="px-6 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold transition-colors cursor-pointer shadow-md text-sm flex items-center gap-2"
               >
                 <Check size={18} />
-                <span>Confirm, Import & Generate QR ({previewItems.length})</span>
+                <span>
+                  {isSyncing
+                    ? 'Uploading to Google Sheet...'
+                    : `Confirm, Import & Generate QR (${previewItems.length})`}
+                </span>
               </button>
             </div>
           </div>
@@ -703,6 +719,7 @@ export default function Stock() {
                   >
                     <option value="PCS">PCS</option>
                     <option value="KGS">KGS</option>
+                    <option value="PAC">PAC</option>
                   </select>
                 </div>
               </div>
@@ -717,9 +734,10 @@ export default function Stock() {
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold transition-colors cursor-pointer shadow-md text-sm"
+                  disabled={isSyncing}
+                  className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold transition-colors cursor-pointer shadow-md text-sm"
                 >
-                  Save Changes
+                  {isSyncing ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>
@@ -738,14 +756,13 @@ export default function Stock() {
               <h3 className="text-xl font-bold text-slate-800">Delete Product?</h3>
             </div>
             <p className="text-slate-600 text-sm">
-              Kya aap sure hain ki aap{' '}
+              Are you sure you want to delete{' '}
               <strong className="text-slate-900">"{deletingItem.name}"</strong> (Code:{' '}
-              <span className="font-mono text-xs">{deletingItem.barcode}</span>) ko inventory se
-              delete karna chahte hain?
+              <span className="font-mono text-xs">{deletingItem.barcode}</span>) from inventory?
             </p>
             <p className="text-xs text-red-500 font-semibold bg-red-50 p-2.5 rounded-lg border border-red-200">
-              Iska current stock ({deletingItem.stock} {normalizeUnit(deletingItem.unit)}) bhi
-              remove ho jayega.
+              Its current stock ({deletingItem.stock} {normalizeUnit(deletingItem.unit)}) will also
+              be removed.
             </p>
 
             <div className="flex justify-end gap-3 pt-2">
@@ -759,9 +776,10 @@ export default function Stock() {
               <button
                 type="button"
                 onClick={handleConfirmDelete}
-                className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold transition-colors cursor-pointer shadow-md text-sm"
+                disabled={isSyncing}
+                className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold transition-colors cursor-pointer shadow-md text-sm"
               >
-                Yes, Delete
+                {isSyncing ? 'Deleting...' : 'Yes, Delete'}
               </button>
             </div>
           </div>

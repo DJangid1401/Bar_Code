@@ -1,11 +1,14 @@
 import QRCode from 'qrcode';
 
-export type AllowedUnit = 'PCS' | 'KGS';
+export type AllowedUnit = 'PCS' | 'KGS' | 'PAC';
 
 export function normalizeUnit(unit?: string): AllowedUnit {
   const u = (unit || '').trim().toUpperCase();
   if (u === 'KG' || u === 'KGS' || u === 'KILOGRAM' || u === 'KILOGRAMS') {
     return 'KGS';
+  }
+  if (u === 'PAC' || u === 'PACK' || u === 'PACKS' || u === 'PKT' || u === 'PACKET' || u === 'PACKETS') {
+    return 'PAC';
   }
   return 'PCS';
 }
