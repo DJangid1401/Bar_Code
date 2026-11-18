@@ -387,8 +387,8 @@ export default function Dashboard() {
   const [selectedProduct, setSelectedProduct] = useState<string>('ALL');
   const [selectedCustomer, setSelectedCustomer] = useState<string>('ALL');
   const [timeRange, setTimeRange] = useState<TimeRange>('365D');
-  const [metric, setMetric] = useState<AnalyticsMetric>('OUT');
-  const [trendFilter, setTrendFilter] = useState<TrendFilter>('OUT');
+  const metric: AnalyticsMetric = 'OUT';
+  const trendFilter: TrendFilter = 'OUT';
   const [orderSearch, setOrderSearch] = useState<string>('');
   const [page, setPage] = useState<number>(1);
 
@@ -611,12 +611,7 @@ export default function Dashboard() {
     };
   }, [filteredLogs, timeRange, topCustomers]);
 
-  const metricLabel =
-    metric === 'OUT'
-      ? 'Sales / Dispatched (OUT)'
-      : metric === 'STOCK'
-      ? 'Remaining Stock'
-      : 'Total Movement (IN + OUT)';
+  const metricLabel = 'Sales';
 
   const rangeLabel =
     timeRange === '365D'
@@ -768,28 +763,11 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {/* Metric Selector */}
+          {/* Sales Indicator */}
           <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 ml-auto">
-            {(
-              [
-                { id: 'OUT', label: 'Sales / OUT' },
-                { id: 'MOVEMENT', label: 'IN + OUT' },
-                { id: 'STOCK', label: 'Stock' },
-              ] as const
-            ).map(tab => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setMetric(tab.id)}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  metric === tab.id
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+            <span className="px-3.5 py-1 rounded-lg text-xs font-bold bg-slate-900 text-white shadow-xs">
+              Sales
+            </span>
           </div>
         </div>
       </div>
@@ -822,7 +800,7 @@ export default function Dashboard() {
 
         <div className="bg-white p-5 rounded-2xl border border-red-100 shadow-xs">
           <p className="text-[11px] font-bold uppercase tracking-wider text-red-500">
-            Total Dispatched ({rangeLabel})
+            Total Sales ({rangeLabel})
           </p>
           <p className="text-xl font-extrabold text-red-700 mt-1 leading-snug">
             {scopedStats.dispatchedText}
@@ -871,19 +849,10 @@ export default function Dashboard() {
                 Loading analytics...
               </div>
             ) : colorsPieData.length === 0 ? (
-              <div className="h-[260px] flex flex-col items-center justify-center text-center space-y-3 text-slate-400">
+              <div className="h-[260px] flex flex-col items-center justify-center text-center space-y-2 text-slate-400">
                 <p className="text-sm font-medium text-slate-500">
-                  No {metricLabel} data for current filters.
+                  No Sales color data for current filters.
                 </p>
-                {metric === 'OUT' && (
-                  <button
-                    type="button"
-                    onClick={() => setMetric('STOCK')}
-                    className="text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 px-3.5 py-2 rounded-xl hover:bg-blue-100 transition-colors cursor-pointer"
-                  >
-                    View by Remaining Stock
-                  </button>
-                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
@@ -978,19 +947,10 @@ export default function Dashboard() {
                 Loading analytics...
               </div>
             ) : sizesPieData.length === 0 ? (
-              <div className="h-[260px] flex flex-col items-center justify-center text-center space-y-3 text-slate-400">
+              <div className="h-[260px] flex flex-col items-center justify-center text-center space-y-2 text-slate-400">
                 <p className="text-sm font-medium text-slate-500">
-                  No {metricLabel} size data for current filters.
+                  No Sales size data for current filters.
                 </p>
-                {metric === 'OUT' && (
-                  <button
-                    type="button"
-                    onClick={() => setMetric('STOCK')}
-                    className="text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-3.5 py-2 rounded-xl hover:bg-emerald-100 transition-colors cursor-pointer"
-                  >
-                    View by Remaining Stock
-                  </button>
-                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
@@ -1261,26 +1221,9 @@ export default function Dashboard() {
           </div>
 
           <div className="flex bg-white p-1 rounded-xl border border-slate-200 shadow-xs w-fit">
-            {(
-              [
-                { id: 'OUT', label: 'Dispatched (OUT)' },
-                { id: 'ALL', label: 'All (IN + OUT)' },
-                { id: 'IN', label: 'Received (IN)' },
-              ] as const
-            ).map(t => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTrendFilter(t.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  trendFilter === t.id
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+            <span className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white shadow-xs">
+              Sales
+            </span>
           </div>
         </div>
 
