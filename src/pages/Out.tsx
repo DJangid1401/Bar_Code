@@ -8,7 +8,9 @@ export default function Out() {
   const { items, scanOut, isSyncing } = useStore();
   const [showScanner, setShowScanner] = useState(false);
   const [barcode, setBarcode] = useState('');
-  const [qty, setQty] = useState<number>(1);
+  const [qty, setQty] = useState<string>('1');
+
+  const numericQty = parseInt(qty, 10) || 0;
 
   const detectedItem = items.find(
     i => i.barcode.toLowerCase() === barcode.trim().toLowerCase()
@@ -35,7 +37,7 @@ export default function Out() {
       return;
     }
 
-    const quantity = Number(qty);
+    const quantity = parseInt(qty, 10);
     if (!quantity || quantity <= 0) {
       alert('Please enter a valid quantity (minimum 1).');
       return;
@@ -56,7 +58,7 @@ export default function Out() {
     alert(result.message);
     if (result.success) {
       setBarcode('');
-      setQty(1);
+      setQty('1');
     }
   };
 
@@ -160,17 +162,40 @@ export default function Out() {
             <label className="block text-sm font-semibold text-slate-700 mb-1">
               Dispatch Quantity (Qty) *
             </label>
-            <input
-              type="number"
-              min="1"
-              max={detectedItem ? detectedItem.stock : undefined}
-              step="1"
-              value={qty}
-              onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))}
-              className="w-full border-2 border-slate-200 p-3 rounded-xl text-base font-bold text-slate-800 focus:border-red-500 focus:outline-none"
-              required
-            />
-            {detectedItem && detectedItem.stock < qty && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setQty(String(Math.max(1, numericQty - 1)))}
+                className="bg-slate-100 hover:bg-slate-200 border-2 border-slate-200 text-slate-800 font-bold w-12 h-[52px] rounded-xl text-xl flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                aria-label="Decrease quantity"
+              >
+                −
+              </button>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={qty}
+                onChange={e => setQty(e.target.value.replace(/[^\d]/g, ''))}
+                placeholder="Enter qty"
+                className="w-full border-2 border-slate-200 p-3 rounded-xl text-base text-center font-bold text-slate-800 focus:border-red-500 focus:outline-none"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const next = numericQty + 1;
+                  setQty(
+                    String(detectedItem ? Math.min(detectedItem.stock, next) : next)
+                  );
+                }}
+                className="bg-slate-100 hover:bg-slate-200 border-2 border-slate-200 text-slate-800 font-bold w-12 h-[52px] rounded-xl text-xl flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                aria-label="Increase quantity"
+              >
+                +
+              </button>
+            </div>
+            {detectedItem && detectedItem.stock < numericQty && (
               <p className="text-xs text-red-500 mt-1">
                 Requested quantity exceeds available stock ({detectedItem.stock} {detectedUnit}).
               </p>
@@ -179,12 +204,20 @@ export default function Out() {
 
           <button
             type="submit"
-            disabled={isSyncing || !barcode.trim() || !detectedItem || detectedItem.stock < qty}
+            disabled={
+              isSyncing ||
+              !barcode.trim() ||
+              !detectedItem ||
+              numericQty <= 0 ||
+              detectedItem.stock < numericQty
+            }
             className="bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-xl w-full flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer"
           >
             <MinusCircle size={22} />
             <span>
-              {isSyncing ? 'Updating Google Sheet...' : `Process Stock OUT (-${qty} ${detectedUnit})`}
+              {isSyncing
+                ? 'Updating Google Sheet...'
+                : `Process Stock OUT (-${numericQty || 0} ${detectedUnit})`}
             </span>
           </button>
         </form>

@@ -12,11 +12,13 @@ export default function In() {
   const [name, setName] = useState('');
   const [size, setSize] = useState('');
   const [color, setColor] = useState('');
-  const [qty, setQty] = useState<number>(1);
+  const [qty, setQty] = useState<string>('1');
   const [unit, setUnit] = useState<AllowedUnit>('PCS');
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [lastSavedItem, setLastSavedItem] = useState<StockItem | null>(null);
   const [showQRModal, setShowQRModal] = useState(false);
+
+  const numericQty = parseInt(qty, 10) || 0;
 
   // Check if item exists in inventory
   const detectedItem = items.find(
@@ -70,7 +72,7 @@ export default function In() {
       return;
     }
 
-    const quantity = Number(qty);
+    const quantity = parseInt(qty, 10);
     if (!quantity || quantity <= 0) {
       alert('Please enter a valid quantity (minimum 1).');
       return;
@@ -96,7 +98,7 @@ export default function In() {
       setName('');
       setSize('');
       setColor('');
-      setQty(1);
+      setQty('1');
       setUnit('PCS');
       setLastScanned(null);
     }
@@ -242,15 +244,34 @@ export default function In() {
               <label className="block text-sm font-semibold text-slate-700 mb-1">
                 Quantity (Qty to IN) *
               </label>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={qty}
-                onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-full border-2 border-slate-200 p-3 rounded-xl text-base font-bold text-slate-800 focus:border-green-500 focus:outline-none"
-                required
-              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setQty(String(Math.max(1, numericQty - 1)))}
+                  className="bg-slate-100 hover:bg-slate-200 border-2 border-slate-200 text-slate-800 font-bold w-12 h-[52px] rounded-xl text-xl flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                  aria-label="Decrease quantity"
+                >
+                  −
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={qty}
+                  onChange={e => setQty(e.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="Enter qty"
+                  className="w-full border-2 border-slate-200 p-3 rounded-xl text-base text-center font-bold text-slate-800 focus:border-green-500 focus:outline-none"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setQty(String(numericQty + 1))}
+                  className="bg-slate-100 hover:bg-slate-200 border-2 border-slate-200 text-slate-800 font-bold w-12 h-[52px] rounded-xl text-xl flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                  aria-label="Increase quantity"
+                >
+                  +
+                </button>
+              </div>
             </div>
 
             <div>
@@ -271,12 +292,14 @@ export default function In() {
 
           <button
             type="submit"
-            disabled={isSyncing}
+            disabled={isSyncing || numericQty <= 0}
             className="bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 px-6 rounded-xl w-full flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer mt-2"
           >
             <PlusCircle size={22} />
             <span>
-              {isSyncing ? 'Saving to Google Sheet...' : `Submit Stock IN (+${qty} ${unit})`}
+              {isSyncing
+                ? 'Saving to Google Sheet...'
+                : `Submit Stock IN (+${numericQty || 0} ${unit})`}
             </span>
           </button>
         </form>

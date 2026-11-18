@@ -50,7 +50,7 @@ export default function Stock() {
   const [editName, setEditName] = useState('');
   const [editSize, setEditSize] = useState('');
   const [editColor, setEditColor] = useState('');
-  const [editStock, setEditStock] = useState<number>(0);
+  const [editStock, setEditStock] = useState<string>('0');
   const [editUnit, setEditUnit] = useState<AllowedUnit>('PCS');
 
   // Delete Modal State
@@ -262,7 +262,7 @@ export default function Stock() {
     setEditName(item.name);
     setEditSize(item.size || '');
     setEditColor(item.color || '');
-    setEditStock(item.stock);
+    setEditStock(String(item.stock));
     setEditUnit(normalizeUnit(item.unit));
   };
 
@@ -276,11 +276,17 @@ export default function Stock() {
       return;
     }
 
+    const parsedStock = parseInt(editStock, 10);
+    if (isNaN(parsedStock) || parsedStock < 0) {
+      alert('Please enter a valid stock quantity (0 or more).');
+      return;
+    }
+
     const result = await updateItem(editingItem.barcode, {
       name: editName.trim(),
       size: editSize.trim(),
       color: editColor.trim(),
-      stock: Math.max(0, editStock),
+      stock: Math.max(0, parsedStock),
       unit: editUnit,
     });
 
@@ -700,10 +706,11 @@ export default function Stock() {
                     Current Stock Quantity *
                   </label>
                   <input
-                    type="number"
-                    min="0"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={editStock}
-                    onChange={e => setEditStock(Math.max(0, parseInt(e.target.value) || 0))}
+                    onChange={e => setEditStock(e.target.value.replace(/[^\d]/g, ''))}
                     className="w-full border-2 border-slate-200 p-2.5 rounded-xl text-base font-bold text-slate-800 focus:border-blue-500 focus:outline-none"
                     required
                   />

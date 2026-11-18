@@ -20,8 +20,9 @@ export default function QRLabelModal({
   title = 'Printable QR Labels',
 }: QRLabelModalProps) {
   const [labels, setLabels] = useState<GeneratedLabel[]>([]);
-  const [copiesPerItem, setCopiesPerItem] = useState<number>(1);
+  const [copiesInput, setCopiesInput] = useState<string>('1');
   const [loading, setLoading] = useState<boolean>(true);
+  const copiesPerItem = Math.max(1, Math.min(50, parseInt(copiesInput, 10) || 1));
 
   useEffect(() => {
     let active = true;
@@ -250,11 +251,23 @@ export default function QRLabelModal({
             <Copy size={16} className="text-slate-400" />
             <span className="font-semibold">Copies per product:</span>
             <input
-              type="number"
-              min="1"
-              max="50"
-              value={copiesPerItem}
-              onChange={e => setCopiesPerItem(Math.max(1, Math.min(50, parseInt(e.target.value) || 1)))}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={copiesInput}
+              onChange={e => {
+                const digits = e.target.value.replace(/[^\d]/g, '');
+                if (!digits) {
+                  setCopiesInput('');
+                } else {
+                  setCopiesInput(String(Math.min(50, parseInt(digits, 10))));
+                }
+              }}
+              onBlur={() => {
+                if (!copiesInput || parseInt(copiesInput, 10) < 1) {
+                  setCopiesInput('1');
+                }
+              }}
               className="w-20 border border-slate-300 rounded-lg px-2.5 py-1 text-center font-bold focus:outline-none focus:border-blue-500"
             />
             <span className="text-xs text-slate-400">
