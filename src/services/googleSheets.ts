@@ -45,7 +45,10 @@ export type SheetApiResponse = {
   logs?: SheetTransaction[];
 };
 
-const ENV_URL = (import.meta.env.VITE_GOOGLE_SHEET_URL || '').trim();
+const DEFAULT_SHEET_URL =
+  'https://script.google.com/macros/s/AKfycbzRjY7fIZtlD3Kw7OM1MaLmgomYtkY9FXmvV4uzUeeuB6v8zKYQ83KL4mtnIc-U6Nqm/exec';
+
+const ENV_URL = (import.meta.env.VITE_GOOGLE_SHEET_URL || DEFAULT_SHEET_URL).trim();
 
 export function getGoogleSheetUrl(): string {
   return ENV_URL;
