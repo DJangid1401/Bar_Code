@@ -18,6 +18,7 @@
 var STOCK_SHEET_NAME = 'Stock';
 var LOGS_SHEET_NAME = 'Transactions';
 var USERS_SHEET_NAME = 'Users';
+var CUSTOMERS_SHEET_NAME = 'Customers';
 
 var STOCK_HEADERS = [
   'Unique Code',
@@ -30,6 +31,7 @@ var STOCK_HEADERS = [
   'Unit',
   'Updated By',
   'Updated At',
+  'Price',
 ];
 
 var LOG_HEADERS = [
@@ -45,6 +47,8 @@ var LOG_HEADERS = [
   'Done By',
   'Timestamp',
   'Customer Name',
+  'Price',
+  'Total Amount',
 ];
 
 var USER_HEADERS = [
@@ -53,6 +57,16 @@ var USER_HEADERS = [
   'Username',
   'Password',
   'Role',
+  'Created At',
+];
+
+var CUSTOMER_HEADERS = [
+  'ID',
+  'Name',
+  'GST',
+  'Phone',
+  'Address',
+  'PAN',
   'Created At',
 ];
 
@@ -111,7 +125,49 @@ function getOrCreateSheets() {
     ]);
   }
 
-  return { stockSheet: stockSheet, logsSheet: logsSheet, usersSheet: usersSheet };
+  var customersSheet = ss.getSheetByName(CUSTOMERS_SHEET_NAME);
+  if (!customersSheet) {
+    customersSheet = ss.insertSheet(CUSTOMERS_SHEET_NAME);
+    customersSheet.appendRow(CUSTOMER_HEADERS);
+    customersSheet.getRange(1, 1, 1, CUSTOMER_HEADERS.length).setFontWeight('bold');
+    customersSheet.setFrozenRows(1);
+  } else if (customersSheet.getLastRow() === 0) {
+    customersSheet.appendRow(CUSTOMER_HEADERS);
+    customersSheet.getRange(1, 1, 1, CUSTOMER_HEADERS.length).setFontWeight('bold');
+    customersSheet.setFrozenRows(1);
+  }
+
+  return {
+    stockSheet: stockSheet,
+    logsSheet: logsSheet,
+    usersSheet: usersSheet,
+    customersSheet: customersSheet,
+  };
+}
+
+function readAllCustomers(customersSheet) {
+  var values = customersSheet.getDataRange().getValues();
+  var customers = [];
+  for (var i = 1; i < values.length; i++) {
+    var r = values[i];
+    var id = String(r[0] || '').trim();
+    var name = String(r[1] || '').trim();
+    var gst = String(r[2] || '').trim();
+    if (!id || !name || !gst) continue;
+    customers.push({
+      id: id,
+      name: name,
+      gst: gst,
+      phone: String(r[3] || '').trim(),
+      address: String(r[4] || '').trim(),
+      pan: String(r[5] || '').trim(),
+      createdAt: Number(r[6]) || Date.now(),
+    });
+  }
+  customers.sort(function (a, b) {
+    return (b.createdAt || 0) - (a.createdAt || 0);
+  });
+  return customers;
 }
 
 function readAllUsers(usersSheet) {
@@ -161,25 +217,81 @@ function readAllData() {
   var stockValues = sheets.stockSheet.getDataRange().getValues();
   var logValues = sheets.logsSheet.getDataRange().getValues();
 
+  var stockHeaders = stockValues.length > 0 ? stockValues[0] : [];
+  var colMap = {};
+  for (var c = 0; c < stockHeaders.length; c++) {
+    colMap[String(stockHeaders[c] || '').trim().toLowerCase()] = c;
+  }
+
+  function findCol(aliases, fallback) {
+    for (var a = 0; a < aliases.length; a++) {
+      var k = aliases[a].toLowerCase();
+      if (colMap[k] !== undefined) return colMap[k];
+    }
+    for (var hName in colMap) {
+      for (var b = 0; b < aliases.length; b++) {
+        if (hName.indexOf(aliases[b].toLowerCase()) !== -1) {
+          return colMap[hName];
+        }
+      }
+    }
+    return fallback;
+  }
+
+  var cBarcode = findCol(['barcode', 'unique code', 'code'], 0);
+  var cName = findCol(['product name', 'name', 'product'], 1);
+  var cSize = findCol(['size'], 2);
+  var cColor = findCol(['color', 'colour'], 3);
+  var cTotalIn = findCol(['total in', 'in'], 4);
+  var cTotalOut = findCol(['total out', 'out'], 5);
+  var cStock = findCol(['remaining stock', 'stock', 'balance', 'remaining'], 6);
+  var cPrice = findCol(
+    [
+      'price per unit',
+      'per unit price',
+      'selling price per pcs',
+      'selling price',
+      'unit price',
+      'price',
+      'rate',
+      'mrp',
+    ],
+    -1
+  );
+  var cUnit = findCol(['unit', 'uom'], 7);
+  var cUpdatedBy = findCol(['updated by', 'done by', 'by'], 8);
+  var cUpdatedAt = findCol(['updated at', 'timestamp', 'date'], 9);
+
   var items = [];
   for (var i = 1; i < stockValues.length; i++) {
     var row = stockValues[i];
-    var barcode = String(row[0] || '').trim();
+    var barcode = String(row[cBarcode] || '').trim();
     if (!barcode) continue;
-    var totalInVal = Number(row[4]) || 0;
-    var totalOutVal = Number(row[5]) || 0;
-    var stockVal = resolveStockValue(row[6], totalInVal, totalOutVal);
+    var totalInVal = Number(row[cTotalIn]) || 0;
+    var totalOutVal = Number(row[cTotalOut]) || 0;
+    var stockVal = resolveStockValue(row[cStock], totalInVal, totalOutVal);
+
+    var rawPrice = cPrice !== -1 ? row[cPrice] : undefined;
+    var priceVal =
+      rawPrice !== undefined &&
+      rawPrice !== '' &&
+      !isNaN(rawPrice) &&
+      Number(rawPrice) < 100000000000
+        ? roundQty(Number(rawPrice))
+        : undefined;
+
     items.push({
       barcode: barcode,
-      name: String(row[1] || '').trim(),
-      size: String(row[2] || '').trim(),
-      color: String(row[3] || '').trim(),
+      name: String(row[cName] || '').trim(),
+      size: String(row[cSize] || '').trim(),
+      color: String(row[cColor] || '').trim(),
+      price: priceVal,
       totalIn: totalInVal,
       totalOut: totalOutVal,
       stock: stockVal,
-      unit: normalizeUnit(row[7]),
-      updatedBy: String(row[8] || '').trim(),
-      updatedAt: Number(row[9]) || 0,
+      unit: normalizeUnit(row[cUnit]),
+      updatedBy: String(row[cUpdatedBy] || '').trim(),
+      updatedAt: Number(row[cUpdatedAt]) || 0,
     });
   }
 
@@ -193,6 +305,10 @@ function readAllData() {
     var lrow = logValues[j];
     var id = String(lrow[0] || '').trim();
     if (!id) continue;
+    var logPrice =
+      lrow[12] !== undefined && lrow[12] !== '' && !isNaN(lrow[12]) ? Number(lrow[12]) : undefined;
+    var logTotal =
+      lrow[13] !== undefined && lrow[13] !== '' && !isNaN(lrow[13]) ? Number(lrow[13]) : undefined;
     logs.push({
       id: id,
       type: String(lrow[1] || 'IN').toUpperCase() === 'OUT' ? 'OUT' : 'IN',
@@ -206,6 +322,8 @@ function readAllData() {
       doneBy: String(lrow[9] || '').trim(),
       timestamp: Number(lrow[10]) || Date.now(),
       customerName: String(lrow[11] || '').trim(),
+      price: logPrice,
+      totalAmount: logTotal,
     });
   }
 
@@ -214,7 +332,8 @@ function readAllData() {
     return (b.timestamp || 0) - (a.timestamp || 0);
   });
 
-  return { items: items, logs: logs };
+  var customers = readAllCustomers(sheets.customersSheet);
+  return { items: items, logs: logs, customers: customers };
 }
 
 function jsonResponse(obj) {
@@ -256,6 +375,7 @@ function doPost(e) {
     var stockSheet = sheets.stockSheet;
     var logsSheet = sheets.logsSheet;
     var usersSheet = sheets.usersSheet;
+    var customersSheet = sheets.customersSheet;
     var now = Date.now();
 
     if (action === 'LOGIN') {
@@ -362,6 +482,74 @@ function doPost(e) {
         success: true,
         message: 'User deleted successfully.',
         users: readAllUsers(usersSheet),
+      });
+    }
+
+    if (action === 'GET_CUSTOMERS') {
+      return jsonResponse({
+        success: true,
+        customers: readAllCustomers(customersSheet),
+      });
+    }
+
+    if (action === 'SAVE_CUSTOMER') {
+      var cust = payload.customer || {};
+      var cId = String(cust.id || '').trim() || Utilities.getUuid();
+      var cName = String(cust.name || '').trim();
+      var cGst = String(cust.gst || '').trim().toUpperCase();
+      var cPhone = String(cust.phone || '').trim();
+      var cAddress = String(cust.address || '').trim();
+      var cPan = String(cust.pan || '').trim().toUpperCase();
+      var cCreated = Number(cust.createdAt) || now;
+
+      if (!cName || !cGst) {
+        return jsonResponse({ success: false, message: 'Customer Name and GST are mandatory.' });
+      }
+
+      var cData = customersSheet.getDataRange().getValues();
+      var cRowIdx = -1;
+      for (var ci = 1; ci < cData.length; ci++) {
+        if (
+          String(cData[ci][0] || '').trim() === cId ||
+          String(cData[ci][2] || '').trim().toUpperCase() === cGst
+        ) {
+          cRowIdx = ci + 1;
+          break;
+        }
+      }
+
+      if (cRowIdx >= 1) {
+        customersSheet.getRange(cRowIdx, 1, 1, CUSTOMER_HEADERS.length).setValues([[
+          cId, cName, cGst, cPhone, cAddress, cPan, cCreated
+        ]]);
+      } else {
+        customersSheet.appendRow([cId, cName, cGst, cPhone, cAddress, cPan, cCreated]);
+      }
+
+      return jsonResponse({
+        success: true,
+        message: 'Customer saved successfully.',
+        customers: readAllCustomers(customersSheet),
+      });
+    }
+
+    if (action === 'DELETE_CUSTOMER') {
+      var delCustId = String(payload.id || '').trim();
+      var cdData = customersSheet.getDataRange().getValues();
+      var cdRowIdx = -1;
+      for (var cdi = 1; cdi < cdData.length; cdi++) {
+        if (String(cdData[cdi][0] || '').trim() === delCustId) {
+          cdRowIdx = cdi + 1;
+          break;
+        }
+      }
+      if (cdRowIdx !== -1) {
+        customersSheet.deleteRow(cdRowIdx);
+      }
+      return jsonResponse({
+        success: true,
+        message: 'Customer deleted successfully.',
+        customers: readAllCustomers(customersSheet),
       });
     }
 
@@ -546,6 +734,15 @@ function doPost(e) {
       var nextTotalOut = roundQty(currTotalOut + outQty);
       var nextStock = roundQty(Math.max(0, currStock - outQty));
 
+      var outPrice =
+        payload.price !== undefined && payload.price !== '' ? roundQty(payload.price) : currRow[10] || '';
+      var outTotal =
+        payload.totalAmount !== undefined && payload.totalAmount !== ''
+          ? roundQty(payload.totalAmount)
+          : outPrice !== ''
+          ? roundQty(Number(outPrice) * outQty)
+          : '';
+
       stockSheet
         .getRange(rowIdx, 1, 1, STOCK_HEADERS.length)
         .setValues([
@@ -560,6 +757,7 @@ function doPost(e) {
             currUnit,
             outBy,
             now,
+            currRow[10] || '',
           ],
         ]);
 
@@ -576,6 +774,8 @@ function doPost(e) {
         outBy,
         now,
         outCustomer,
+        outPrice,
+        outTotal,
       ]);
 
       var afterOut = readAllData();
@@ -747,6 +947,9 @@ function doPost(e) {
           : resolveStockValue(oldRow[6], oldRow[4], oldRow[5]);
       var nextUnitVal = normalizeUnit(payload.unit !== undefined ? payload.unit : oldRow[7]);
 
+      var nextPrice =
+        payload.price !== undefined && payload.price !== '' ? roundQty(payload.price) : oldRow[10] || '';
+
       stockSheet
         .getRange(uRowIdx, 1, 1, STOCK_HEADERS.length)
         .setValues([
@@ -761,6 +964,7 @@ function doPost(e) {
             nextUnitVal,
             updBy,
             now,
+            nextPrice,
           ],
         ]);
 

@@ -1,10 +1,12 @@
 import { AllowedUnit, normalizeUnit, roundQty } from '../utils/qrHelper';
+import { Customer } from '../types/customer';
 
 export type SheetStockItem = {
   barcode: string;
   name: string;
   size: string;
   color: string;
+  price?: number;
   totalIn: number;
   totalOut: number;
   stock: number;
@@ -22,6 +24,8 @@ export type SheetTransaction = {
   color?: string;
   qty: number;
   unit?: AllowedUnit;
+  price?: number;
+  totalAmount?: number;
   source?: 'SCAN' | 'MANUAL' | 'EXCEL_IMPORT';
   doneBy?: string;
   customerName?: string;
@@ -47,7 +51,10 @@ export type SheetActionType =
   | 'LOGIN'
   | 'GET_USERS'
   | 'CREATE_USER'
-  | 'DELETE_USER';
+  | 'DELETE_USER'
+  | 'GET_CUSTOMERS'
+  | 'SAVE_CUSTOMER'
+  | 'DELETE_CUSTOMER';
 
 export type SheetApiResponse = {
   success: boolean;
@@ -59,6 +66,8 @@ export type SheetApiResponse = {
   logs?: SheetTransaction[];
   user?: SheetUser;
   users?: SheetUser[];
+  customer?: Customer;
+  customers?: Customer[];
 };
 
 const DEFAULT_SHEET_URL =
@@ -93,11 +102,22 @@ function normalizeItem(raw: Partial<SheetStockItem>): SheetStockItem {
     stock = roundQty(Math.max(0, totalIn - totalOut));
   }
 
+  const rawPriceVal = (raw as Record<string, unknown>).price;
+  const rawPrice =
+    rawPriceVal !== undefined && rawPriceVal !== null && rawPriceVal !== ''
+      ? Number(rawPriceVal)
+      : undefined;
+  const price =
+    rawPrice !== undefined && !isNaN(rawPrice) && rawPrice >= 0 && rawPrice < 100000000000
+      ? roundQty(rawPrice)
+      : undefined;
+
   return {
     barcode: String(raw.barcode || '').trim(),
     name: String(raw.name || '').trim(),
     size: String(raw.size || '').trim(),
     color: String(raw.color || '').trim(),
+    price,
     totalIn,
     totalOut,
     stock,
@@ -108,6 +128,25 @@ function normalizeItem(raw: Partial<SheetStockItem>): SheetStockItem {
 }
 
 function normalizeLog(raw: Partial<SheetTransaction>): SheetTransaction {
+  const rawPriceVal = (raw as Record<string, unknown>).price;
+  const rawPrice =
+    rawPriceVal !== undefined && rawPriceVal !== null && rawPriceVal !== ''
+      ? Number(rawPriceVal)
+      : undefined;
+  const price =
+    rawPrice !== undefined && !isNaN(rawPrice) && rawPrice >= 0 && rawPrice < 100000000000
+      ? roundQty(rawPrice)
+      : undefined;
+  const qty = roundQty(Number(raw.qty) || 0);
+  const rawTotalVal = (raw as Record<string, unknown>).totalAmount;
+  const rawTotal =
+    rawTotalVal !== undefined && rawTotalVal !== null && rawTotalVal !== ''
+      ? Number(rawTotalVal)
+      : price !== undefined
+      ? price * qty
+      : undefined;
+  const totalAmount = rawTotal !== undefined && !isNaN(rawTotal) ? roundQty(rawTotal) : undefined;
+
   return {
     id: String(raw.id || ''),
     type: raw.type === 'OUT' ? 'OUT' : 'IN',
@@ -115,8 +154,10 @@ function normalizeLog(raw: Partial<SheetTransaction>): SheetTransaction {
     name: String(raw.name || '').trim(),
     size: String(raw.size || '').trim(),
     color: String(raw.color || '').trim(),
-    qty: roundQty(Number(raw.qty) || 0),
+    qty,
     unit: normalizeUnit(raw.unit),
+    price,
+    totalAmount,
     source: raw.source || 'MANUAL',
     doneBy: String(raw.doneBy || '').trim(),
     customerName: String(raw.customerName || '').trim(),

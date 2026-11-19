@@ -8,12 +8,16 @@ import {
   setSavedDemoMode,
 } from '../utils/demoSalesData';
 import { normalizeUnit, roundQty } from '../utils/qrHelper';
+import DateRangePicker, {
+  DateRangeFilter,
+  isTimestampInRange,
+  getDateRangeLabel,
+} from '../components/DateRangePicker';
 import {
   ShoppingBag,
   Search,
   Filter,
   Users,
-  Calendar,
   Sparkles,
   Database,
   ChevronLeft,
@@ -21,23 +25,14 @@ import {
   Download,
 } from 'lucide-react';
 
-type TimeRange = '365D' | '90D' | '30D' | '7D';
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 const ORDERS_PER_PAGE = 20;
-
-function getRangeCutoff(range: TimeRange): number {
-  const days =
-    range === '365D' ? 365 : range === '90D' ? 90 : range === '30D' ? 30 : 7;
-  return Date.now() - days * DAY_MS;
-}
 
 export default function Sales() {
   const { items: liveItems, logs: liveLogs, isLoading } = useStore();
   const [useDemoData, setUseDemoData] = useState<boolean>(() => getSavedDemoMode());
   const [selectedProduct, setSelectedProduct] = useState<string>('ALL');
   const [selectedCustomer, setSelectedCustomer] = useState<string>('ALL');
-  const [timeRange, setTimeRange] = useState<TimeRange>('365D');
+  const [dateFilter, setDateFilter] = useState<DateRangeFilter>({ preset: '365D' });
   const [orderSearch, setOrderSearch] = useState<string>('');
   const [page, setPage] = useState<number>(1);
 
@@ -82,13 +77,12 @@ export default function Sales() {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [salesLogs]);
 
-  // Apply time range, product, customer & text search filters
+  // Apply date range, product, customer & text search filters
   const filteredOrders = useMemo(() => {
-    const cutoff = getRangeCutoff(timeRange);
     const q = orderSearch.trim().toLowerCase();
 
     return salesLogs.filter(log => {
-      if (log.timestamp < cutoff) return false;
+      if (!isTimestampInRange(log.timestamp, dateFilter)) return false;
       if (
         selectedProduct !== 'ALL' &&
         log.name.trim().toLowerCase() !== selectedProduct.toLowerCase()
@@ -113,7 +107,7 @@ export default function Sales() {
       }
       return true;
     });
-  }, [salesLogs, timeRange, selectedProduct, selectedCustomer, orderSearch]);
+  }, [salesLogs, dateFilter, selectedProduct, selectedCustomer, orderSearch]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PER_PAGE));
   const safePage = Math.min(page, totalPages);
@@ -131,59 +125,70 @@ export default function Sales() {
     let kgs = 0;
     let pac = 0;
     let pcs = 0;
+    let totalRevenue = 0;
+
     for (const l of filteredOrders) {
       const u = normalizeUnit(l.unit);
       if (u === 'KGS') kgs += l.qty || 0;
       else if (u === 'PAC') pac += l.qty || 0;
       else pcs += l.qty || 0;
+
+      const lineTotal = l.totalAmount ?? (l.price != null ? l.price * l.qty : 0);
+      totalRevenue += lineTotal;
     }
     const parts: string[] = [];
     if (roundQty(kgs) > 0) parts.push(`${roundQty(kgs)} KGS`);
     if (roundQty(pac) > 0) parts.push(`${roundQty(pac)} PAC`);
     if (roundQty(pcs) > 0) parts.push(`${roundQty(pcs)} PCS`);
 
-    const days =
-      timeRange === '365D' ? 365 : timeRange === '90D' ? 90 : timeRange === '30D' ? 30 : 7;
-
     return {
       totalOrders: filteredOrders.length,
-      avgPerDay: roundQty(filteredOrders.length / days),
       activeCustomers: uniqueCust.size,
       volumeText: parts.length > 0 ? parts.join(' + ') : '0',
+      totalRevenue: Math.round(totalRevenue),
     };
-  }, [filteredOrders, timeRange]);
+  }, [filteredOrders]);
 
-  const rangeLabel =
-    timeRange === '365D'
-      ? 'Last 1 Year'
-      : timeRange === '90D'
-      ? 'Last 90 Days'
-      : timeRange === '30D'
-      ? 'Last 30 Days'
-      : 'Last 7 Days';
+  const rangeLabel = getDateRangeLabel(dateFilter);
 
   const handleExportCsv = () => {
-    const header = ['Date & Time', 'Customer Name', 'Product', 'Unique Code', 'Size', 'Color', 'Qty', 'Unit'];
+    const header = [
+      'Date & Time',
+      'Customer Name',
+      'Product',
+      'Unique Code',
+      'Size',
+      'Color',
+      'Price (₹)',
+      'Qty Purchased',
+      'Unit',
+      'Total Amount (₹)',
+    ];
     const escapeCell = (val: string | number) => {
       const s = String(val ?? '');
       return `"${s.replace(/"/g, '""')}"`;
     };
-    const rows = filteredOrders.map(o => [
-      new Date(o.timestamp).toLocaleString(),
-      o.customerName || 'Walk-in Customer',
-      o.name,
-      o.barcode,
-      o.size || '-',
-      formatColorLabel(o.color),
-      o.qty,
-      normalizeUnit(o.unit),
-    ]);
+    const rows = filteredOrders.map(o => {
+      const lineTotal = o.totalAmount ?? (o.price != null ? o.price * o.qty : '');
+      return [
+        new Date(o.timestamp).toLocaleString(),
+        o.customerName || 'Walk-in Customer',
+        o.name,
+        o.barcode,
+        o.size || '-',
+        formatColorLabel(o.color),
+        o.price != null ? o.price : '',
+        o.qty,
+        normalizeUnit(o.unit),
+        lineTotal !== '' ? roundQty(Number(lineTotal)) : '',
+      ];
+    });
     const csv = [header, ...rows].map(r => r.map(escapeCell).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Swati_Full_Sales_${timeRange}.csv`;
+    a.download = `Swati_Full_Sales_${rangeLabel.replace(/[\s/]/g, '_')}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -311,34 +316,14 @@ export default function Sales() {
             </select>
           </div>
 
-          {/* Time Range Selector */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-            <Calendar size={14} className="text-slate-500 ml-1.5 mr-1" />
-            {(
-              [
-                { id: '365D', label: '1 Year' },
-                { id: '90D', label: '90D' },
-                { id: '30D', label: '30D' },
-                { id: '7D', label: '7D' },
-              ] as const
-            ).map(r => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => {
-                  setTimeRange(r.id);
-                  setPage(1);
-                }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  timeRange === r.id
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
+          {/* Interactive Date Range Picker with Calendar Popover */}
+          <DateRangePicker
+            value={dateFilter}
+            onChange={f => {
+              setDateFilter(f);
+              setPage(1);
+            }}
+          />
         </div>
       </div>
 
@@ -351,9 +336,7 @@ export default function Sales() {
           <p className="text-3xl font-extrabold text-slate-900 mt-1">
             {summary.totalOrders.toLocaleString()}
           </p>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Avg {summary.avgPerDay} customer orders / day
-          </p>
+          <p className="text-xs text-slate-500 mt-0.5">Customer purchases completed</p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-indigo-100 shadow-xs">
@@ -364,7 +347,7 @@ export default function Sales() {
             {summary.activeCustomers}
           </p>
           <p className="text-xs text-slate-500 mt-0.5">
-            {selectedCustomer === 'ALL' ? 'Unique customers in selection' : selectedCustomer}
+            {selectedCustomer === 'ALL' ? 'Unique active buyers' : selectedCustomer}
           </p>
         </div>
 
@@ -412,7 +395,7 @@ export default function Sales() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[720px] text-sm">
+          <table className="w-full text-left border-collapse min-w-[880px] text-sm">
             <thead>
               <tr className="bg-slate-50/70 border-b border-slate-200 text-slate-500 text-xs font-bold uppercase tracking-wider">
                 <th className="p-3.5">Date &amp; Time</th>
@@ -420,13 +403,15 @@ export default function Sales() {
                 <th className="p-3.5">Product</th>
                 <th className="p-3.5">Size</th>
                 <th className="p-3.5">Color</th>
+                <th className="p-3.5 text-right">Price (₹)</th>
                 <th className="p-3.5 text-right">Qty Purchased</th>
+                <th className="p-3.5 text-right">Total (₹)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading && activeItems.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-12 text-slate-400 text-sm">
+                  <td colSpan={8} className="text-center py-12 text-slate-400 text-sm">
                     Loading sales records...
                   </td>
                 </tr>
@@ -461,8 +446,23 @@ export default function Sales() {
                         {formatColorLabel(order.color)}
                       </span>
                     </td>
+                    <td className="p-3.5 text-right font-semibold text-slate-700 whitespace-nowrap">
+                      {order.price != null && order.price > 0
+                        ? `₹${order.price.toLocaleString('en-IN')}`
+                        : '—'}
+                    </td>
                     <td className="p-3.5 text-right font-bold text-red-600 whitespace-nowrap">
                       -{order.qty} {normalizeUnit(order.unit)}
+                    </td>
+                    <td className="p-3.5 text-right font-bold text-emerald-700 whitespace-nowrap">
+                      {(() => {
+                        const total =
+                          order.totalAmount ??
+                          (order.price != null ? order.price * order.qty : null);
+                        return total != null && total > 0
+                          ? `₹${roundQty(total).toLocaleString('en-IN')}`
+                          : '—';
+                      })()}
                     </td>
                   </tr>
                 ))

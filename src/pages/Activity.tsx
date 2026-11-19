@@ -72,67 +72,109 @@ export default function Activity() {
   const [filter, setFilter] = useState<ViewFilter>('ALL');
 
   const totalItems = items.length;
-  const totalPcs = items
-    .filter(i => normalizeUnit(i.unit) === 'PCS')
-    .reduce((acc, item) => acc + item.stock, 0);
-  const totalKgs = items
-    .filter(i => normalizeUnit(i.unit) === 'KGS')
-    .reduce((acc, item) => acc + item.stock, 0);
-  const totalPac = items
-    .filter(i => normalizeUnit(i.unit) === 'PAC')
-    .reduce((acc, item) => acc + item.stock, 0);
 
-  // Per-product IN / OUT / Remaining flow list
+  // Real transaction logs only (strictly ignoring any demo dataset logs)
+  const realLogs = useMemo(
+    () => logs.filter(l => !l.id?.startsWith('demo-')),
+    [logs]
+  );
+  const realInLogs = useMemo(() => realLogs.filter(l => l.type === 'IN'), [realLogs]);
+  const realOutLogs = useMemo(() => realLogs.filter(l => l.type === 'OUT'), [realLogs]);
+
+  // Per-product IN / OUT / Remaining flow strictly from real logs
   const itemFlowList = useMemo(() => {
     const inMap = new Map<string, number>();
     const outMap = new Map<string, number>();
 
-    for (const log of logs) {
+    for (const log of realInLogs) {
       const key = log.barcode.toLowerCase();
-      if (log.type === 'IN') {
-        inMap.set(key, (inMap.get(key) || 0) + (log.qty || 1));
-      } else {
-        outMap.set(key, (outMap.get(key) || 0) + (log.qty || 1));
-      }
+      inMap.set(key, roundQty((inMap.get(key) || 0) + (log.qty || 0)));
     }
 
-    return items.map(item => {
+    for (const log of realOutLogs) {
+      const key = log.barcode.toLowerCase();
+      outMap.set(key, roundQty((outMap.get(key) || 0) + (log.qty || 0)));
+    }
+
+    const seen = new Set<string>();
+    const list = items.map(item => {
       const key = item.barcode.toLowerCase();
-      const computedIn = item.totalIn || inMap.get(key) || item.stock;
-      const computedOut = item.totalOut || outMap.get(key) || 0;
+      seen.add(key);
+      const computedIn = inMap.get(key) || 0;
+      const computedOut = outMap.get(key) || 0;
+      const computedRemaining = roundQty(Math.max(0, computedIn - computedOut));
       return {
         ...item,
         computedIn,
         computedOut,
+        stock: computedRemaining,
       };
     });
-  }, [items, logs]);
 
-  const getWeightedInQty = (qty: number, unit?: string) =>
-    normalizeUnit(unit) === 'KGS' ? roundQty(qty * 2) : roundQty(qty);
+    for (const log of realLogs) {
+      const key = log.barcode.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        const computedIn = inMap.get(key) || 0;
+        const computedOut = outMap.get(key) || 0;
+        const computedRemaining = roundQty(Math.max(0, computedIn - computedOut));
+        list.push({
+          barcode: log.barcode,
+          name: log.name,
+          size: log.size || '',
+          color: log.color || '',
+          stock: computedRemaining,
+          computedIn,
+          computedOut,
+          totalIn: computedIn,
+          totalOut: computedOut,
+          unit: log.unit || 'PCS',
+        });
+      }
+    }
 
-  const totalInFromItems = roundQty(
-    itemFlowList.reduce((acc, i) => acc + getWeightedInQty(i.computedIn, i.unit), 0)
+    return list;
+  }, [items, realInLogs, realOutLogs, realLogs]);
+
+  // Real Remaining Stock by unit (computed strictly from real IN - real OUT)
+  const totalPcs = roundQty(
+    itemFlowList
+      .filter(i => normalizeUnit(i.unit) === 'PCS')
+      .reduce((acc, item) => acc + item.stock, 0)
   );
-  const totalInFromLogs = roundQty(
-    logs
-      .filter(l => l.type === 'IN')
-      .reduce((acc, l) => acc + getWeightedInQty(l.qty || 0, l.unit), 0)
+  const totalKgs = roundQty(
+    itemFlowList
+      .filter(i => normalizeUnit(i.unit) === 'KGS')
+      .reduce((acc, item) => acc + item.stock, 0)
   );
-  const totalIn = Math.max(totalInFromItems, totalInFromLogs);
+  const totalPac = roundQty(
+    itemFlowList
+      .filter(i => normalizeUnit(i.unit) === 'PAC')
+      .reduce((acc, item) => acc + item.stock, 0)
+  );
+  const hasAnyRemaining = totalPcs > 0 || totalKgs > 0 || totalPac > 0;
 
-  const sumOutByUnit = (targetUnit: AllowedUnit) => {
-    const fromItems = roundQty(
-      itemFlowList
-        .filter(i => normalizeUnit(i.unit) === targetUnit)
-        .reduce((acc, i) => acc + i.computedOut, 0)
-    );
-    const fromLogs = roundQty(
-      logs
-        .filter(l => l.type === 'OUT' && normalizeUnit(l.unit) === targetUnit)
+  // Real Received (IN) by unit strictly from real IN logs
+  const sumInByUnit = (targetUnit: AllowedUnit) => {
+    return roundQty(
+      realInLogs
+        .filter(l => normalizeUnit(l.unit) === targetUnit)
         .reduce((acc, l) => acc + (l.qty || 0), 0)
     );
-    return Math.max(fromItems, fromLogs);
+  };
+
+  const totalInPcs = sumInByUnit('PCS');
+  const totalInKgs = sumInByUnit('KGS');
+  const totalInPac = sumInByUnit('PAC');
+  const hasAnyIn = totalInPcs > 0 || totalInKgs > 0 || totalInPac > 0;
+
+  // Real Dispatched (OUT) by unit strictly from real OUT logs
+  const sumOutByUnit = (targetUnit: AllowedUnit) => {
+    return roundQty(
+      realOutLogs
+        .filter(l => normalizeUnit(l.unit) === targetUnit)
+        .reduce((acc, l) => acc + (l.qty || 0), 0)
+    );
   };
 
   const totalOutPcs = sumOutByUnit('PCS');
@@ -263,10 +305,12 @@ export default function Activity() {
               Remaining Stock
             </p>
             <p className="text-2xl font-extrabold text-slate-900 mt-1">
-              {formatQtySummary(totalPcs, totalKgs, totalPac)}
+              {hasAnyRemaining ? formatQtySummary(totalPcs, totalKgs, totalPac) : '0'}
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              {categorySummaries.length} Categories in stock
+              {totalKgs > 0
+                ? `${totalKgs} KGS = ${roundQty(totalKgs * 2)} pkts (500g)`
+                : `${categorySummaries.length} Categories in stock`}
             </p>
           </div>
           <div className="bg-blue-50 text-blue-600 p-3.5 rounded-xl">
@@ -298,8 +342,14 @@ export default function Activity() {
             <p className="text-xs font-bold text-green-600 uppercase tracking-wider">
               Total Received (IN)
             </p>
-            <p className="text-3xl font-extrabold text-green-700 mt-1">+{totalIn}</p>
-            <p className="text-xs text-green-600/80 mt-1">Total units received</p>
+            <p className="text-2xl font-extrabold text-green-700 mt-1">
+              {hasAnyIn ? `+${formatQtySummary(totalInPcs, totalInKgs, totalInPac)}` : '0'}
+            </p>
+            <p className="text-xs text-green-600/80 mt-1">
+              {totalInKgs > 0
+                ? `${totalInKgs} KGS = ${roundQty(totalInKgs * 2)} pkts (500g)`
+                : 'Unit-wise received total'}
+            </p>
           </div>
           <div className="bg-green-50 text-green-600 p-3.5 rounded-xl">
             <ArrowDownToLine size={26} />

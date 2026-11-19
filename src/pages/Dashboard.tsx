@@ -2,12 +2,16 @@ import { useMemo, useState } from 'react';
 import { useStore, StockItem, Transaction } from '../store';
 import {
   ENABLE_DEMO_MODE,
-  formatColorLabel,
   generateOneYearDemoDataset,
   getSavedDemoMode,
   setSavedDemoMode,
 } from '../utils/demoSalesData';
 import { normalizeUnit, roundQty } from '../utils/qrHelper';
+import DateRangePicker, {
+  DateRangeFilter,
+  isTimestampInRange,
+  getDateRangeLabel,
+} from '../components/DateRangePicker';
 import {
   ResponsiveContainer,
   PieChart,
@@ -19,29 +23,19 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  LineChart,
-  Line,
-  Legend,
 } from 'recharts';
 import {
   BarChart3,
   PieChart as PieChartIcon,
-  TrendingUp,
   Trophy,
   Filter,
   Layers,
-  Palette,
   Ruler,
   Package,
   Users,
-  Calendar,
   Sparkles,
   Database,
 } from 'lucide-react';
-
-type AnalyticsMetric = 'OUT' | 'MOVEMENT' | 'STOCK';
-type TrendFilter = 'ALL' | 'OUT' | 'IN';
-type TimeRange = '365D' | '90D' | '30D' | '7D';
 
 const CHART_PALETTE = [
   '#2563eb', // Blue
@@ -71,91 +65,28 @@ type RankingDatum = {
   unitHint: string;
 };
 
-type LineSeriesBundle = {
-  data: Array<Record<string, string | number>>;
-  seriesKeys: string[];
-};
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-function getRangeCutoff(range: TimeRange): number {
-  const days =
-    range === '365D' ? 365 : range === '90D' ? 90 : range === '30D' ? 30 : 7;
-  return Date.now() - days * DAY_MS;
-}
-
 function buildPieFromLogsOrItems(
   logs: Transaction[],
-  items: StockItem[],
-  groupBy: 'color' | 'size',
-  metric: AnalyticsMetric,
-  hasCustomerOrRangeFilter: boolean
+  _items?: StockItem[],
+  _hasCustomerOrRangeFilter?: boolean
 ): SliceDatum[] {
   const map = new Map<string, { label: string; value: number; units: Set<string> }>();
 
-  if (metric === 'STOCK' && !hasCustomerOrRangeFilter) {
-    for (const item of items) {
-      const val = roundQty(item.stock || 0);
+  const matchingLogs = logs.filter(l => l.type === 'OUT');
+
+  if (matchingLogs.length > 0) {
+    for (const log of matchingLogs) {
+      const val = roundQty(log.qty || 0);
       if (val <= 0) continue;
-      const rawLabel =
-        groupBy === 'color'
-          ? formatColorLabel(item.color)
-          : (item.size || '').trim() || 'Standard Size';
+      const rawLabel = (log.size || '').trim() || 'Standard Size';
       const key = rawLabel.toLowerCase();
-      const unit = normalizeUnit(item.unit);
+      const unit = normalizeUnit(log.unit);
       const existing = map.get(key);
       if (existing) {
         existing.value = roundQty(existing.value + val);
         existing.units.add(unit);
       } else {
         map.set(key, { label: rawLabel, value: val, units: new Set([unit]) });
-      }
-    }
-  } else {
-    const matchingLogs = logs.filter(l => {
-      if (metric === 'OUT') return l.type === 'OUT';
-      if (metric === 'STOCK') return l.type === 'OUT';
-      return true;
-    });
-
-    if (matchingLogs.length > 0) {
-      for (const log of matchingLogs) {
-        const val = roundQty(log.qty || 0);
-        if (val <= 0) continue;
-        const rawLabel =
-          groupBy === 'color'
-            ? formatColorLabel(log.color)
-            : (log.size || '').trim() || 'Standard Size';
-        const key = rawLabel.toLowerCase();
-        const unit = normalizeUnit(log.unit);
-        const existing = map.get(key);
-        if (existing) {
-          existing.value = roundQty(existing.value + val);
-          existing.units.add(unit);
-        } else {
-          map.set(key, { label: rawLabel, value: val, units: new Set([unit]) });
-        }
-      }
-    } else if (!hasCustomerOrRangeFilter) {
-      for (const item of items) {
-        const val =
-          metric === 'OUT'
-            ? roundQty(item.totalOut || 0)
-            : roundQty((item.totalIn || 0) + (item.totalOut || 0));
-        if (val <= 0) continue;
-        const rawLabel =
-          groupBy === 'color'
-            ? formatColorLabel(item.color)
-            : (item.size || '').trim() || 'Standard Size';
-        const key = rawLabel.toLowerCase();
-        const unit = normalizeUnit(item.unit);
-        const existing = map.get(key);
-        if (existing) {
-          existing.value = roundQty(existing.value + val);
-          existing.units.add(unit);
-        } else {
-          map.set(key, { label: rawLabel, value: val, units: new Set([unit]) });
-        }
       }
     }
   }
@@ -188,70 +119,34 @@ function buildPieFromLogsOrItems(
 
 function buildRankingFromLogsOrItems(
   logs: Transaction[],
-  items: StockItem[],
-  groupBy: 'name' | 'size' | 'color' | 'customer',
-  metric: AnalyticsMetric,
+  _items?: StockItem[],
+  groupBy: 'name' | 'size' | 'customer' = 'name',
   limit = 8
 ): RankingDatum[] {
   const map = new Map<string, { label: string; value: number; units: Set<string> }>();
 
-  const useLogs = groupBy === 'customer' || (metric !== 'STOCK' && logs.length > 0);
+  for (const log of logs) {
+    if (log.type !== 'OUT') continue;
 
-  if (useLogs) {
-    for (const log of logs) {
-      if (groupBy === 'customer' && log.type !== 'OUT') continue;
-      if (groupBy !== 'customer' && metric === 'OUT' && log.type !== 'OUT') continue;
+    const rawLabel =
+      groupBy === 'customer'
+        ? (log.customerName || '').trim()
+        : groupBy === 'name'
+        ? log.name.trim()
+        : (log.size || '').trim() || 'Standard Size';
 
-      const rawLabel =
-        groupBy === 'customer'
-          ? (log.customerName || '').trim()
-          : groupBy === 'name'
-          ? log.name.trim()
-          : groupBy === 'size'
-          ? (log.size || '').trim() || 'Standard Size'
-          : formatColorLabel(log.color);
+    if (!rawLabel) continue;
+    const val = roundQty(log.qty || 0);
+    if (val <= 0) continue;
 
-      if (!rawLabel) continue;
-      const val = roundQty(log.qty || 0);
-      if (val <= 0) continue;
-
-      const key = rawLabel.toLowerCase();
-      const unit = normalizeUnit(log.unit);
-      const existing = map.get(key);
-      if (existing) {
-        existing.value = roundQty(existing.value + val);
-        existing.units.add(unit);
-      } else {
-        map.set(key, { label: rawLabel, value: val, units: new Set([unit]) });
-      }
-    }
-  } else {
-    for (const item of items) {
-      const val =
-        metric === 'OUT'
-          ? roundQty(item.totalOut || 0)
-          : metric === 'STOCK'
-          ? roundQty(item.stock || 0)
-          : roundQty((item.totalIn || 0) + (item.totalOut || 0));
-      if (val <= 0) continue;
-
-      const rawLabel =
-        groupBy === 'name'
-          ? item.name.trim()
-          : groupBy === 'size'
-          ? (item.size || '').trim() || 'Standard Size'
-          : formatColorLabel(item.color);
-      if (!rawLabel) continue;
-
-      const key = rawLabel.toLowerCase();
-      const unit = normalizeUnit(item.unit);
-      const existing = map.get(key);
-      if (existing) {
-        existing.value = roundQty(existing.value + val);
-        existing.units.add(unit);
-      } else {
-        map.set(key, { label: rawLabel, value: val, units: new Set([unit]) });
-      }
+    const key = rawLabel.toLowerCase();
+    const unit = normalizeUnit(log.unit);
+    const existing = map.get(key);
+    if (existing) {
+      existing.value = roundQty(existing.value + val);
+      existing.units.add(unit);
+    } else {
+      map.set(key, { label: rawLabel, value: val, units: new Set([unit]) });
     }
   }
 
@@ -265,124 +160,12 @@ function buildRankingFromLogsOrItems(
     }));
 }
 
-function buildCombinedLineChart(
-  logs: Transaction[],
-  itemsByBarcode: Map<string, StockItem>,
-  comboType: 'PRODUCT_COLOR' | 'SIZE_COLOR' | 'PRODUCT_SIZE',
-  trendFilter: TrendFilter,
-  timeRange: TimeRange
-): LineSeriesBundle {
-  const filteredLogs = logs
-    .filter(log => trendFilter === 'ALL' || log.type === trendFilter)
-    .slice()
-    .sort((a, b) => a.timestamp - b.timestamp);
-
-  if (filteredLogs.length === 0) {
-    return { data: [], seriesKeys: [] };
-  }
-
-  const uniqueDayKeys = new Set(
-    filteredLogs.map(l => {
-      const d = new Date(l.timestamp);
-      return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-    })
-  );
-
-  const getBucket = (ts: number): { key: string; label: string } => {
-    const d = new Date(ts);
-    if (timeRange === '365D' && uniqueDayKeys.size > 45) {
-      // Monthly buckets across 1 full year (e.g. Nov '25 ... Nov '26)
-      const y = d.getFullYear();
-      const m = d.getMonth();
-      const key = `${y}-${String(m + 1).padStart(2, '0')}`;
-      const label = d.toLocaleDateString([], { month: 'short', year: '2-digit' });
-      return { key, label };
-    }
-    if (timeRange === '90D' && uniqueDayKeys.size > 21) {
-      // Weekly buckets (Monday start)
-      const dayOfWeek = d.getDay();
-      const diff = d.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-      const weekStart = new Date(d.getFullYear(), d.getMonth(), diff);
-      const key = `${weekStart.getFullYear()}-${String(weekStart.getMonth() + 1).padStart(
-        2,
-        '0'
-      )}-${String(weekStart.getDate()).padStart(2, '0')}`;
-      const label = weekStart.toLocaleDateString([], { day: '2-digit', month: 'short' });
-      return { key, label };
-    }
-    if (uniqueDayKeys.size >= 2) {
-      // Daily buckets
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-        d.getDate()
-      ).padStart(2, '0')}`;
-      const label = d.toLocaleDateString([], { day: '2-digit', month: 'short' });
-      return { key, label };
-    }
-    // Single day: time slots
-    const key = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(
-      2,
-      '0'
-    )}`;
-    const label = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    return { key, label };
-  };
-
-  const getSeriesName = (log: Transaction): string => {
-    const refItem = itemsByBarcode.get(log.barcode.toLowerCase());
-    const prod = (log.name || refItem?.name || 'Unknown').trim();
-    const size = (log.size || refItem?.size || 'Standard').trim();
-    const color = formatColorLabel(log.color || refItem?.color);
-
-    if (comboType === 'PRODUCT_COLOR') return `${prod} - ${color}`;
-    if (comboType === 'SIZE_COLOR') return `${size} - ${color}`;
-    return `${prod} - ${size}`;
-  };
-
-  const seriesTotals = new Map<string, number>();
-  const bucketMap = new Map<string, { label: string; values: Map<string, number> }>();
-
-  for (const log of filteredLogs) {
-    const series = getSeriesName(log);
-    const qty = roundQty(log.qty || 0);
-    if (qty <= 0) continue;
-
-    seriesTotals.set(series, roundQty((seriesTotals.get(series) || 0) + qty));
-
-    const bucket = getBucket(log.timestamp);
-    let bucketEntry = bucketMap.get(bucket.key);
-    if (!bucketEntry) {
-      bucketEntry = { label: bucket.label, values: new Map() };
-      bucketMap.set(bucket.key, bucketEntry);
-    }
-    bucketEntry.values.set(series, roundQty((bucketEntry.values.get(series) || 0) + qty));
-  }
-
-  const topSeries = Array.from(seriesTotals.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([name]) => name);
-
-  const sortedBucketKeys = Array.from(bucketMap.keys()).sort();
-  const data = sortedBucketKeys.map(bKey => {
-    const entry = bucketMap.get(bKey)!;
-    const row: Record<string, string | number> = { time: entry.label };
-    for (const sKey of topSeries) {
-      row[sKey] = entry.values.get(sKey) || 0;
-    }
-    return row;
-  });
-
-  return { data, seriesKeys: topSeries };
-}
-
 export default function Dashboard() {
   const { items: liveItems, logs: liveLogs, isLoading } = useStore();
   const [useDemoData, setUseDemoData] = useState<boolean>(() => getSavedDemoMode());
   const [selectedProduct, setSelectedProduct] = useState<string>('ALL');
   const [selectedCustomer, setSelectedCustomer] = useState<string>('ALL');
-  const [timeRange, setTimeRange] = useState<TimeRange>('365D');
-  const metric: AnalyticsMetric = 'OUT';
-  const trendFilter: TrendFilter = 'OUT';
+  const [dateFilter, setDateFilter] = useState<DateRangeFilter>({ preset: '365D' });
 
   // Generate 1-year dummy dataset only when Demo Mode is active
   const demoDataset = useMemo(
@@ -414,14 +197,6 @@ export default function Dashboard() {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [activeLogs]);
 
-  const itemsByBarcode = useMemo(() => {
-    const map = new Map<string, StockItem>();
-    for (const item of activeItems) {
-      map.set(item.barcode.toLowerCase(), item);
-    }
-    return map;
-  }, [activeItems]);
-
   // Filtered items by Product Selector
   const filteredItems = useMemo(() => {
     if (selectedProduct === 'ALL') return activeItems;
@@ -430,12 +205,10 @@ export default function Dashboard() {
     );
   }, [activeItems, selectedProduct]);
 
-  // Filtered logs by Time Range + Product + Customer
-  const rangeCutoff = useMemo(() => getRangeCutoff(timeRange), [timeRange]);
-
+  // Filtered logs by Date Range + Product + Customer
   const filteredLogs = useMemo(() => {
     return activeLogs.filter(log => {
-      if (log.timestamp < rangeCutoff) return false;
+      if (!isTimestampInRange(log.timestamp, dateFilter)) return false;
       if (
         selectedProduct !== 'ALL' &&
         log.name.trim().toLowerCase() !== selectedProduct.toLowerCase()
@@ -450,12 +223,12 @@ export default function Dashboard() {
       }
       return true;
     });
-  }, [activeLogs, rangeCutoff, selectedProduct, selectedCustomer]);
+  }, [activeLogs, dateFilter, selectedProduct, selectedCustomer]);
 
-  // Logs filtered by Time Range + Customer (for global Top Products comparison)
+  // Logs filtered by Date Range + Customer (for Top Products comparison)
   const rangeCustomerLogs = useMemo(() => {
     return activeLogs.filter(log => {
-      if (log.timestamp < rangeCutoff) return false;
+      if (!isTimestampInRange(log.timestamp, dateFilter)) return false;
       if (
         selectedCustomer !== 'ALL' &&
         (log.customerName || '').trim().toLowerCase() !== selectedCustomer.toLowerCase()
@@ -464,88 +237,29 @@ export default function Dashboard() {
       }
       return true;
     });
-  }, [activeLogs, rangeCutoff, selectedCustomer]);
+  }, [activeLogs, dateFilter, selectedCustomer]);
 
-  const hasCustomerOrRangeFilter = selectedCustomer !== 'ALL' || timeRange !== '365D';
+  const hasCustomerOrRangeFilter =
+    selectedCustomer !== 'ALL' || dateFilter.preset !== '365D';
 
-  // Pie / Donut datasets
-  const colorsPieData = useMemo(
-    () =>
-      buildPieFromLogsOrItems(
-        filteredLogs,
-        filteredItems,
-        'color',
-        metric,
-        hasCustomerOrRangeFilter
-      ),
-    [filteredLogs, filteredItems, metric, hasCustomerOrRangeFilter]
-  );
-
+  // Sizes Donut dataset
   const sizesPieData = useMemo(
-    () =>
-      buildPieFromLogsOrItems(
-        filteredLogs,
-        filteredItems,
-        'size',
-        metric,
-        hasCustomerOrRangeFilter
-      ),
-    [filteredLogs, filteredItems, metric, hasCustomerOrRangeFilter]
+    () => buildPieFromLogsOrItems(filteredLogs, filteredItems, hasCustomerOrRangeFilter),
+    [filteredLogs, filteredItems, hasCustomerOrRangeFilter]
   );
 
   // Top Rankings datasets
   const topProducts = useMemo(
-    () => buildRankingFromLogsOrItems(rangeCustomerLogs, activeItems, 'name', metric, 7),
-    [rangeCustomerLogs, activeItems, metric]
+    () => buildRankingFromLogsOrItems(rangeCustomerLogs, activeItems, 'name', 7),
+    [rangeCustomerLogs, activeItems]
   );
   const topSizes = useMemo(
-    () => buildRankingFromLogsOrItems(filteredLogs, filteredItems, 'size', metric, 7),
-    [filteredLogs, filteredItems, metric]
-  );
-  const topColors = useMemo(
-    () => buildRankingFromLogsOrItems(filteredLogs, filteredItems, 'color', metric, 8),
-    [filteredLogs, filteredItems, metric]
-  );
-  const topCustomers = useMemo(
-    () => buildRankingFromLogsOrItems(filteredLogs, filteredItems, 'customer', 'OUT', 8),
+    () => buildRankingFromLogsOrItems(filteredLogs, filteredItems, 'size', 7),
     [filteredLogs, filteredItems]
   );
-
-  // 3 Combined Multi-Series Line Charts
-  const productColorTrend = useMemo(
-    () =>
-      buildCombinedLineChart(
-        filteredLogs,
-        itemsByBarcode,
-        'PRODUCT_COLOR',
-        trendFilter,
-        timeRange
-      ),
-    [filteredLogs, itemsByBarcode, trendFilter, timeRange]
-  );
-
-  const sizeColorTrend = useMemo(
-    () =>
-      buildCombinedLineChart(
-        filteredLogs,
-        itemsByBarcode,
-        'SIZE_COLOR',
-        trendFilter,
-        timeRange
-      ),
-    [filteredLogs, itemsByBarcode, trendFilter, timeRange]
-  );
-
-  const productSizeTrend = useMemo(
-    () =>
-      buildCombinedLineChart(
-        filteredLogs,
-        itemsByBarcode,
-        'PRODUCT_SIZE',
-        trendFilter,
-        timeRange
-      ),
-    [filteredLogs, itemsByBarcode, trendFilter, timeRange]
+  const topCustomers = useMemo(
+    () => buildRankingFromLogsOrItems(filteredLogs, filteredItems, 'customer', 7),
+    [filteredLogs, filteredItems]
   );
 
   // Scoped KPI summary
@@ -566,12 +280,8 @@ export default function Dashboard() {
     if (roundQty(outPac) > 0) volParts.push(`${roundQty(outPac)} PAC`);
     if (roundQty(outPcs) > 0) volParts.push(`${roundQty(outPcs)} PCS`);
 
-    const days =
-      timeRange === '365D' ? 365 : timeRange === '90D' ? 90 : timeRange === '30D' ? 30 : 7;
-
     return {
       totalOrders: outLogs.length,
-      avgPerDay: roundQty(outLogs.length / days),
       activeCustomers: uniqueCust.size,
       dispatchedText: volParts.length > 0 ? volParts.join(' + ') : '0',
       topCustomerName: topCustomers[0]?.name || '—',
@@ -579,18 +289,9 @@ export default function Dashboard() {
         ? `${topCustomers[0].value} ${topCustomers[0].unitHint}`
         : '',
     };
-  }, [filteredLogs, timeRange, topCustomers]);
+  }, [filteredLogs, topCustomers]);
 
-  const metricLabel = 'Sales';
-
-  const rangeLabel =
-    timeRange === '365D'
-      ? 'Last 1 Year'
-      : timeRange === '90D'
-      ? 'Last 90 Days'
-      : timeRange === '30D'
-      ? 'Last 30 Days'
-      : 'Last 7 Days';
+  const rangeLabel = getDateRangeLabel(dateFilter);
 
   return (
     <div className="space-y-6 pb-12">
@@ -603,7 +304,7 @@ export default function Dashboard() {
               Analytics Dashboard
             </h1>
             <p className="text-slate-500 text-sm mt-0.5">
-              Product, Size, Color &amp; Customer sales intelligence over time.
+              Product, Size &amp; Customer sales intelligence ({rangeLabel}).
             </p>
           </div>
 
@@ -696,38 +397,12 @@ export default function Dashboard() {
             </select>
           </div>
 
-          {/* Time Range Selector */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-            <Calendar size={14} className="text-slate-500 ml-1.5 mr-1" />
-            {(
-              [
-                { id: '365D', label: '1 Year' },
-                { id: '90D', label: '90D' },
-                { id: '30D', label: '30D' },
-                { id: '7D', label: '7D' },
-              ] as const
-            ).map(r => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => setTimeRange(r.id)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  timeRange === r.id
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Sales Indicator */}
-          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 ml-auto">
-            <span className="px-3.5 py-1 rounded-lg text-xs font-bold bg-slate-900 text-white shadow-xs">
-              Sales
-            </span>
-          </div>
+          {/* Interactive Date Range Picker with Working Calendar */}
+          <DateRangePicker
+            value={dateFilter}
+            onChange={setDateFilter}
+            showPresetsInline={true}
+          />
         </div>
       </div>
 
@@ -735,14 +410,12 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
           <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Total Purchases ({rangeLabel})
+            Total Orders ({rangeLabel})
           </p>
           <p className="text-3xl font-extrabold text-slate-900 mt-1">
             {scopedStats.totalOrders.toLocaleString()}
           </p>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Avg {scopedStats.avgPerDay} customer orders / day
-          </p>
+          <p className="text-xs text-slate-500 mt-0.5">Dispatched sales transactions</p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-indigo-100 shadow-xs">
@@ -782,215 +455,110 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* SECTION 1: INTERACTIVE FILTERABLE PIE / DONUT CHARTS */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        {/* Colors Donut Chart */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-          <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Palette className="text-blue-600" size={20} />
-              <div>
-                <h2 className="font-bold text-slate-800 text-base">
-                  Colors Distribution —{' '}
-                  {selectedProduct === 'ALL' ? 'All Products' : selectedProduct}
-                </h2>
-                <p className="text-xs text-slate-500">
-                  {metricLabel} &bull; {rangeLabel}
-                </p>
-              </div>
+      {/* SIZES DISTRIBUTION DONUT CHART */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Ruler className="text-emerald-600" size={20} />
+            <div>
+              <h2 className="font-bold text-slate-800 text-base">
+                Sizes Distribution —{' '}
+                {selectedProduct === 'ALL' ? 'All Products' : selectedProduct}
+              </h2>
+              <p className="text-xs text-slate-500">Sales &bull; {rangeLabel}</p>
             </div>
-            <PieChartIcon size={18} className="text-slate-400" />
           </div>
-
-          <div className="p-5 flex-1">
-            {isLoading && activeItems.length === 0 ? (
-              <div className="h-[260px] flex items-center justify-center text-slate-400 text-sm">
-                Loading analytics...
-              </div>
-            ) : colorsPieData.length === 0 ? (
-              <div className="h-[260px] flex flex-col items-center justify-center text-center space-y-2 text-slate-400">
-                <p className="text-sm font-medium text-slate-500">
-                  No Sales color data for current filters.
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                <div className="h-[250px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={colorsPieData}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius="54%"
-                        outerRadius="84%"
-                        paddingAngle={2}
-                      >
-                        {colorsPieData.map((entry, index) => (
-                          <Cell key={`color-cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value, _name, props) => {
-                          const payload = props?.payload as SliceDatum | undefined;
-                          return [
-                            `${value ?? 0} ${payload?.unitHint || ''} (${payload?.percent ?? 0}%)`,
-                            payload?.name || '',
-                          ];
-                        }}
-                        contentStyle={{
-                          borderRadius: '12px',
-                          border: '1px solid #e2e8f0',
-                          boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.1)',
-                          fontSize: '12px',
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
-                  {colorsPieData.map(slice => (
-                    <div
-                      key={slice.name}
-                      className="flex items-center justify-between text-xs bg-slate-50 border border-slate-100 rounded-lg px-3 py-2"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className="w-3 h-3 rounded-full shrink-0"
-                          style={{ backgroundColor: slice.color }}
-                        />
-                        <span className="font-semibold text-slate-700 truncate">
-                          {slice.name}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="font-bold text-slate-900">
-                          {slice.value} {slice.unitHint}
-                        </span>
-                        <span className="bg-white border border-slate-200 text-slate-600 font-bold px-1.5 py-0.5 rounded text-[11px]">
-                          {slice.percent}%
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          <PieChartIcon size={18} className="text-slate-400" />
         </div>
 
-        {/* Sizes Donut Chart */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-          <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Ruler className="text-emerald-600" size={20} />
-              <div>
-                <h2 className="font-bold text-slate-800 text-base">
-                  Sizes Distribution —{' '}
-                  {selectedProduct === 'ALL' ? 'All Products' : selectedProduct}
-                </h2>
-                <p className="text-xs text-slate-500">
-                  {metricLabel} &bull; {rangeLabel}
-                </p>
+        <div className="p-6">
+          {isLoading && activeItems.length === 0 ? (
+            <div className="h-[240px] flex items-center justify-center text-slate-400 text-sm">
+              Loading analytics...
+            </div>
+          ) : sizesPieData.length === 0 ? (
+            <div className="h-[240px] flex items-center justify-center text-slate-400 text-sm">
+              No size data for current selection.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+              <div className="h-[260px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={sizesPieData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius="54%"
+                      outerRadius="84%"
+                      paddingAngle={3}
+                    >
+                      {sizesPieData.map((entry, index) => (
+                        <Cell key={`size-cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value, _name, props) => {
+                        const payload = props?.payload as SliceDatum | undefined;
+                        return [
+                          `${value ?? 0} ${payload?.unitHint || ''} (${payload?.percent ?? 0}%)`,
+                          payload?.name || '',
+                        ];
+                      }}
+                      contentStyle={{
+                        borderRadius: '12px',
+                        border: '1px solid #e2e8f0',
+                        boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.1)',
+                        fontSize: '12px',
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+                {sizesPieData.map(slice => (
+                  <div
+                    key={slice.name}
+                    className="flex items-center justify-between text-xs bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-2.5"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span
+                        className="w-3.5 h-3.5 rounded-full shrink-0 shadow-xs"
+                        style={{ backgroundColor: slice.color }}
+                      />
+                      <span className="font-semibold text-slate-800 truncate">
+                        {slice.name}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-bold text-slate-900">
+                        {slice.value} {slice.unitHint}
+                      </span>
+                      <span className="bg-white border border-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded-md text-[11px]">
+                        {slice.percent}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-            <PieChartIcon size={18} className="text-slate-400" />
-          </div>
-
-          <div className="p-5 flex-1">
-            {isLoading && activeItems.length === 0 ? (
-              <div className="h-[260px] flex items-center justify-center text-slate-400 text-sm">
-                Loading analytics...
-              </div>
-            ) : sizesPieData.length === 0 ? (
-              <div className="h-[260px] flex flex-col items-center justify-center text-center space-y-2 text-slate-400">
-                <p className="text-sm font-medium text-slate-500">
-                  No Sales size data for current filters.
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                <div className="h-[250px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={sizesPieData}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius="54%"
-                        outerRadius="84%"
-                        paddingAngle={2}
-                      >
-                        {sizesPieData.map((entry, index) => (
-                          <Cell key={`size-cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value, _name, props) => {
-                          const payload = props?.payload as SliceDatum | undefined;
-                          return [
-                            `${value ?? 0} ${payload?.unitHint || ''} (${payload?.percent ?? 0}%)`,
-                            payload?.name || '',
-                          ];
-                        }}
-                        contentStyle={{
-                          borderRadius: '12px',
-                          border: '1px solid #e2e8f0',
-                          boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.1)',
-                          fontSize: '12px',
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
-                  {sizesPieData.map(slice => (
-                    <div
-                      key={slice.name}
-                      className="flex items-center justify-between text-xs bg-slate-50 border border-slate-100 rounded-lg px-3 py-2"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className="w-3 h-3 rounded-full shrink-0"
-                          style={{ backgroundColor: slice.color }}
-                        />
-                        <span className="font-semibold text-slate-700 truncate">
-                          {slice.name}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="font-bold text-slate-900">
-                          {slice.value} {slice.unitHint}
-                        </span>
-                        <span className="bg-white border border-slate-200 text-slate-600 font-bold px-1.5 py-0.5 rounded text-[11px]">
-                          {slice.percent}%
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
-      {/* SECTION 2: HIGHEST RUNNING / TOP RANKINGS (PRODUCTS, SIZES, COLORS, CUSTOMERS) */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
+      {/* TOP RANKINGS: 3 CLEAN CARDS (PRODUCTS, CUSTOMERS, SIZES) */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
           <Trophy className="text-amber-500" size={22} />
           <h2 className="text-xl font-bold text-slate-800">
-            Highest Running Rankings ({metricLabel} &bull; {rangeLabel})
+            Top Rankings ({rangeLabel})
           </h2>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {/* Top Running Products */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
             <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm mb-4">
@@ -999,7 +567,7 @@ export default function Dashboard() {
             </h3>
             {topProducts.length === 0 ? (
               <div className="h-[220px] flex items-center justify-center text-slate-400 text-xs">
-                No product data yet.
+                No product movement in this range.
               </div>
             ) : (
               <div className="h-[230px] w-full">
@@ -1014,13 +582,13 @@ export default function Dashboard() {
                     <YAxis
                       type="category"
                       dataKey="name"
-                      width={110}
+                      width={100}
                       tick={{ fontSize: 11, fill: '#1e293b', fontWeight: 600 }}
                     />
                     <Tooltip
                       formatter={(value, _name, props) => {
                         const d = props?.payload as RankingDatum | undefined;
-                        return [`${value ?? 0} ${d?.unitHint || ''}`, 'Volume'];
+                        return [`${value ?? 0} ${d?.unitHint || ''}`, 'Sales'];
                       }}
                       contentStyle={{
                         borderRadius: '10px',
@@ -1028,22 +596,22 @@ export default function Dashboard() {
                         fontSize: '12px',
                       }}
                     />
-                    <Bar dataKey="value" fill="#2563eb" radius={[0, 6, 6, 0]} barSize={20} />
+                    <Bar dataKey="value" fill="#2563eb" radius={[0, 6, 6, 0]} barSize={18} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             )}
           </div>
 
-          {/* Top Customers */}
+          {/* Top Customers (Highest Buyers) */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
             <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm mb-4">
-              <Users size={17} className="text-amber-600" />
+              <Users size={17} className="text-amber-500" />
               Top Customers (Highest Buyers)
             </h3>
             {topCustomers.length === 0 ? (
               <div className="h-[220px] flex items-center justify-center text-slate-400 text-xs">
-                No customer purchase data yet.
+                No customer orders for this selection.
               </div>
             ) : (
               <div className="h-[230px] w-full">
@@ -1058,8 +626,8 @@ export default function Dashboard() {
                     <YAxis
                       type="category"
                       dataKey="name"
-                      width={145}
-                      tick={{ fontSize: 11, fill: '#1e293b', fontWeight: 600 }}
+                      width={110}
+                      tick={{ fontSize: 10, fill: '#1e293b', fontWeight: 600 }}
                     />
                     <Tooltip
                       formatter={(value, _name, props) => {
@@ -1102,13 +670,13 @@ export default function Dashboard() {
                     <YAxis
                       type="category"
                       dataKey="name"
-                      width={120}
+                      width={110}
                       tick={{ fontSize: 11, fill: '#1e293b', fontWeight: 600 }}
                     />
                     <Tooltip
                       formatter={(value, _name, props) => {
                         const d = props?.payload as RankingDatum | undefined;
-                        return [`${value ?? 0} ${d?.unitHint || ''}`, 'Volume'];
+                        return [`${value ?? 0} ${d?.unitHint || ''}`, 'Sales'];
                       }}
                       contentStyle={{
                         borderRadius: '10px',
@@ -1116,221 +684,8 @@ export default function Dashboard() {
                         fontSize: '12px',
                       }}
                     />
-                    <Bar dataKey="value" fill="#10b981" radius={[0, 6, 6, 0]} barSize={20} />
+                    <Bar dataKey="value" fill="#10b981" radius={[0, 6, 6, 0]} barSize={18} />
                   </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-
-          {/* Top Running Colors */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-            <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm mb-4">
-              <Palette size={17} className="text-violet-600" />
-              Top Running Colors
-            </h3>
-            {topColors.length === 0 ? (
-              <div className="h-[220px] flex items-center justify-center text-slate-400 text-xs">
-                No color data for this selection.
-              </div>
-            ) : (
-              <div className="h-[230px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={topColors}
-                    layout="vertical"
-                    margin={{ top: 4, right: 20, left: 4, bottom: 4 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
-                    <XAxis type="number" tick={{ fontSize: 11, fill: '#64748b' }} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={86}
-                      tick={{ fontSize: 11, fill: '#1e293b', fontWeight: 600 }}
-                    />
-                    <Tooltip
-                      formatter={(value, _name, props) => {
-                        const d = props?.payload as RankingDatum | undefined;
-                        return [`${value ?? 0} ${d?.unitHint || ''}`, 'Volume'];
-                      }}
-                      contentStyle={{
-                        borderRadius: '10px',
-                        border: '1px solid #e2e8f0',
-                        fontSize: '12px',
-                      }}
-                    />
-                    <Bar dataKey="value" fill="#8b5cf6" radius={[0, 6, 6, 0]} barSize={18} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* SECTION 3: 3 COMBINED MULTI-SERIES LINE CHARTS (TRENDS OVER TIME) */}
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="text-blue-600" size={22} />
-            <h2 className="text-xl font-bold text-slate-800">
-              Combined Multi-Series Trend Charts ({rangeLabel})
-            </h2>
-          </div>
-
-          <div className="flex bg-white p-1 rounded-xl border border-slate-200 shadow-xs w-fit">
-            <span className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white shadow-xs">
-              Sales
-            </span>
-          </div>
-        </div>
-
-        {/* 1. Products + Colors */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-          <div className="mb-4">
-            <h3 className="font-bold text-slate-800 text-base">
-              1. Combined Trend — Products + Colors
-            </h3>
-            <p className="text-xs text-slate-500">
-              Comparative trend of top Product &amp; Color combinations over {rangeLabel.toLowerCase()}
-            </p>
-          </div>
-          {productColorTrend.data.length === 0 ? (
-            <div className="h-[240px] flex items-center justify-center text-slate-400 text-sm">
-              No transaction history found for this filter.
-            </div>
-          ) : (
-            <div className="h-[270px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={productColorTrend.data}
-                  margin={{ top: 8, right: 20, left: 0, bottom: 8 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#64748b' }} />
-                  <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: '12px',
-                      border: '1px solid #e2e8f0',
-                      boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.1)',
-                      fontSize: '12px',
-                    }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
-                  {productColorTrend.seriesKeys.map((key, idx) => (
-                    <Line
-                      key={key}
-                      type="monotone"
-                      dataKey={key}
-                      stroke={CHART_PALETTE[idx % CHART_PALETTE.length]}
-                      strokeWidth={2.5}
-                      dot={{ r: 3.5 }}
-                      activeDot={{ r: 6 }}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-
-        {/* 2. Size + Colors & 3. Products + Size */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-            <div className="mb-4">
-              <h3 className="font-bold text-slate-800 text-base">
-                2. Combined Trend — Size + Colors
-              </h3>
-              <p className="text-xs text-slate-500">
-                Top Size &amp; Color combinations over {rangeLabel.toLowerCase()}
-              </p>
-            </div>
-            {sizeColorTrend.data.length === 0 ? (
-              <div className="h-[240px] flex items-center justify-center text-slate-400 text-sm">
-                No transaction history found for this filter.
-              </div>
-            ) : (
-              <div className="h-[260px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={sizeColorTrend.data}
-                    margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#64748b' }} />
-                    <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: '12px',
-                        border: '1px solid #e2e8f0',
-                        boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.1)',
-                        fontSize: '12px',
-                      }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
-                    {sizeColorTrend.seriesKeys.map((key, idx) => (
-                      <Line
-                        key={key}
-                        type="monotone"
-                        dataKey={key}
-                        stroke={CHART_PALETTE[(idx + 2) % CHART_PALETTE.length]}
-                        strokeWidth={2.5}
-                        dot={{ r: 3.5 }}
-                        activeDot={{ r: 6 }}
-                      />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-            <div className="mb-4">
-              <h3 className="font-bold text-slate-800 text-base">
-                3. Combined Trend — Products + Size
-              </h3>
-              <p className="text-xs text-slate-500">
-                Top Product &amp; Size combinations over {rangeLabel.toLowerCase()}
-              </p>
-            </div>
-            {productSizeTrend.data.length === 0 ? (
-              <div className="h-[240px] flex items-center justify-center text-slate-400 text-sm">
-                No transaction history found for this filter.
-              </div>
-            ) : (
-              <div className="h-[260px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={productSizeTrend.data}
-                    margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#64748b' }} />
-                    <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: '12px',
-                        border: '1px solid #e2e8f0',
-                        boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.1)',
-                        fontSize: '12px',
-                      }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
-                    {productSizeTrend.seriesKeys.map((key, idx) => (
-                      <Line
-                        key={key}
-                        type="monotone"
-                        dataKey={key}
-                        stroke={CHART_PALETTE[(idx + 4) % CHART_PALETTE.length]}
-                        strokeWidth={2.5}
-                        dot={{ r: 3.5 }}
-                        activeDot={{ r: 6 }}
-                      />
-                    ))}
-                  </LineChart>
                 </ResponsiveContainer>
               </div>
             )}

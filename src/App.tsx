@@ -14,10 +14,12 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ShoppingBag,
+  Contact2,
 } from 'lucide-react';
 import { useStore } from './store';
 import Dashboard from './pages/Dashboard';
 import Sales from './pages/Sales';
+import Customers from './pages/Customers';
 import Activity from './pages/Activity';
 import In from './pages/In';
 import Out from './pages/Out';
@@ -44,6 +46,7 @@ function Sidebar({ isOpen, onClose }: SidebarProps) {
   const links = [
     { path: '/', name: 'Dashboard', icon: LayoutDashboard },
     { path: '/sales', name: 'Full Sales', icon: ShoppingBag },
+    { path: '/customers', name: 'Customer DB', icon: Contact2 },
     { path: '/activity', name: 'Activity', icon: ActivityIcon },
     { path: '/in', name: 'Stock IN', icon: ArrowDownToLine },
     { path: '/out', name: 'Stock OUT', icon: ArrowUpFromLine },
@@ -246,6 +249,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/sales" element={<Sales />} />
+            <Route path="/customers" element={<Customers />} />
             <Route path="/activity" element={<Activity />} />
             <Route path="/in" element={<In />} />
             <Route path="/out" element={<Out />} />

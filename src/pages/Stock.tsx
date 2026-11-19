@@ -15,6 +15,7 @@ import {
   AlertCircle,
   QrCode,
   Printer,
+  IndianRupee,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -55,6 +56,7 @@ export default function Stock() {
   const [editName, setEditName] = useState('');
   const [editSize, setEditSize] = useState('');
   const [editColor, setEditColor] = useState('');
+  const [editPrice, setEditPrice] = useState('');
   const [editStock, setEditStock] = useState<string>('0');
   const [editUnit, setEditUnit] = useState<AllowedUnit>('PCS');
 
@@ -268,6 +270,7 @@ export default function Stock() {
     setEditName(item.name);
     setEditSize(item.size || '');
     setEditColor(item.color || '');
+    setEditPrice(item.price !== undefined && item.price !== null ? String(item.price) : '');
     setEditStock(String(item.stock));
     setEditUnit(normalizeUnit(item.unit));
   };
@@ -288,10 +291,16 @@ export default function Stock() {
       return;
     }
 
+    const parsedPrice =
+      editPrice.trim() !== '' && !isNaN(parseFloat(editPrice)) && parseFloat(editPrice) >= 0
+        ? roundQty(parseFloat(editPrice))
+        : undefined;
+
     const result = await updateItem(editingItem.barcode, {
       name: editName.trim(),
       size: editSize.trim(),
       color: editColor.trim(),
+      price: parsedPrice,
       stock: Math.max(0, parsedStock),
       unit: editUnit,
     });
@@ -413,6 +422,7 @@ export default function Stock() {
                 <th className="p-4">Unique Code</th>
                 <th className="p-4">Size</th>
                 <th className="p-4">Color</th>
+                <th className="p-4 text-right">Price (₹)</th>
                 <th className="p-4 text-right">Current Stock</th>
                 <th className="p-4 text-center">{isAdmin ? 'QR & Actions' : 'QR'}</th>
               </tr>
@@ -466,6 +476,15 @@ export default function Stock() {
                         </span>
                       ) : (
                         <span className="text-slate-300">-</span>
+                      )}
+                    </td>
+                    <td className="p-4 text-right">
+                      {item.price !== undefined && item.price !== null ? (
+                        <span className="font-mono font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded text-xs">
+                          ₹{item.price}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 font-normal">—</span>
                       )}
                     </td>
                     <td className="p-4 text-right">
@@ -711,7 +730,23 @@ export default function Stock() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">
+                    Price (₹ / Unit)
+                  </label>
+                  <div className="relative">
+                    <IndianRupee className="absolute left-3 top-3.5 text-slate-400" size={15} />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={editPrice}
+                      onChange={e => setEditPrice(sanitizeDecimalInput(e.target.value))}
+                      placeholder="e.g. 250"
+                      className="w-full border-2 border-slate-200 pl-8 pr-3 py-2.5 rounded-xl text-base font-bold text-slate-800 focus:border-blue-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1">
                     Current Stock Quantity *

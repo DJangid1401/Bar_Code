@@ -1,4 +1,5 @@
 import { StockItem, Transaction } from '../store';
+import { Customer } from '../types/customer';
 import { AllowedUnit, normalizeUnit, roundQty } from './qrHelper';
 
 /**
@@ -80,6 +81,35 @@ export const DUMMY_CUSTOMERS: string[] = (() => {
   return list; // 20 x 5 = exactly 100 unique customers
 })();
 
+const INDIAN_STATES = ['27', '24', '08', '07', '23', '06'];
+const CITIES = [
+  'Kalbadevi, Mumbai - 400002',
+  'Ring Road, Surat - 395002',
+  'Chandni Chowk, Delhi - 110006',
+  'Johari Bazar, Jaipur - 302003',
+  'Sarafa Bazar, Indore - 452002',
+];
+
+export const DUMMY_CUSTOMER_ACCOUNTS: Customer[] = DUMMY_CUSTOMERS.map((name, idx) => {
+  const stateCode = INDIAN_STATES[idx % INDIAN_STATES.length];
+  const panPrefix = 'AABC' + String.fromCharCode(65 + (idx % 26));
+  const panNum = String(1000 + ((idx * 73) % 8999));
+  const panChar = String.fromCharCode(65 + ((idx * 3) % 26));
+  const pan = `${panPrefix}${panNum}${panChar}`;
+  const gst = `${stateCode}${pan}1Z${(idx % 9) + 1}`;
+  const phone = `+91 98${String(10000000 + idx * 79193).slice(0, 8)}`;
+  const address = `Shop ${idx + 101}, ${CITIES[idx % CITIES.length]}`;
+  return {
+    id: `cust-demo-${idx + 1}`,
+    name,
+    gst,
+    phone,
+    address,
+    pan,
+    createdAt: Date.now() - (365 - idx) * 24 * 60 * 60 * 1000,
+  };
+});
+
 // Deterministic PRNG so 1-year analytics stay stable across re-renders
 function createRng(seed: number) {
   let state = seed >>> 0;
@@ -91,27 +121,28 @@ function createRng(seed: number) {
   };
 }
 
-type CatalogEntry = {
+export type CatalogEntry = {
   barcode: string;
   name: string;
   size: string;
   color: string;
+  price: number;
   unit: AllowedUnit;
 };
 
-const FALLBACK_CATALOG: CatalogEntry[] = [
-  { barcode: 'PRD-T001', name: 'TYRE', size: '2.5 MM TYRE', color: 'T-1', unit: 'PAC' },
-  { barcode: 'PRD-T002', name: 'TYRE', size: '2.5 MM TYRE', color: 'T-7', unit: 'PAC' },
-  { barcode: 'PRD-T003', name: 'TYRE', size: '2.5 MM TYRE', color: 'T-10', unit: 'PAC' },
-  { barcode: 'PRD-T004', name: 'TYRE', size: '2.5 MM TYRE', color: 'ML-5', unit: 'PAC' },
-  { barcode: 'PRD-T005', name: 'TYRE', size: '3.5 MM TYRE', color: 'ML-27', unit: 'PAC' },
-  { barcode: 'PRD-HM001', name: 'HOLE MOTI', size: '6 MM HOLE MOTI', color: 'T-1', unit: 'KGS' },
-  { barcode: 'PRD-HM002', name: 'HOLE MOTI', size: '6 MM HOLE MOTI', color: 'T-10', unit: 'KGS' },
-  { barcode: 'PRD-HM003', name: 'HOLE MOTI', size: '6 MM HOLE MOTI', color: 'ML-5', unit: 'KGS' },
-  { barcode: 'PRD-HM004', name: 'HOLE MOTI', size: '8 MM HOLE MOTI', color: 'T-19', unit: 'KGS' },
-  { barcode: 'PRD-GL001', name: 'Globe', size: '4 MM GLOBE', color: 'T-15', unit: 'KGS' },
-  { barcode: 'PRD-OT001', name: 'Oval Tumble', size: '5 MM OVAL', color: 'N-10', unit: 'PAC' },
-  { barcode: 'PRD-SJ001', name: 'Small Cut Sujani', size: '3 MM SUJANI', color: 'T-30', unit: 'KGS' },
+export const FALLBACK_CATALOG: CatalogEntry[] = [
+  { barcode: 'PRD-T001', name: 'TYRE', size: '2.5 MM TYRE', color: 'T-1', price: 240, unit: 'PAC' },
+  { barcode: 'PRD-T002', name: 'TYRE', size: '2.5 MM TYRE', color: 'T-7', price: 240, unit: 'PAC' },
+  { barcode: 'PRD-T003', name: 'TYRE', size: '2.5 MM TYRE', color: 'T-10', price: 240, unit: 'PAC' },
+  { barcode: 'PRD-T004', name: 'TYRE', size: '2.5 MM TYRE', color: 'ML-5', price: 260, unit: 'PAC' },
+  { barcode: 'PRD-T005', name: 'TYRE', size: '3.5 MM TYRE', color: 'ML-27', price: 280, unit: 'PAC' },
+  { barcode: 'PRD-HM001', name: 'HOLE MOTI', size: '6 MM HOLE MOTI', color: 'T-1', price: 380, unit: 'KGS' },
+  { barcode: 'PRD-HM002', name: 'HOLE MOTI', size: '6 MM HOLE MOTI', color: 'T-10', price: 380, unit: 'KGS' },
+  { barcode: 'PRD-HM003', name: 'HOLE MOTI', size: '6 MM HOLE MOTI', color: 'ML-5', price: 420, unit: 'KGS' },
+  { barcode: 'PRD-HM004', name: 'HOLE MOTI', size: '8 MM HOLE MOTI', color: 'T-19', price: 450, unit: 'KGS' },
+  { barcode: 'PRD-GL001', name: 'Globe', size: '4 MM GLOBE', color: 'T-15', price: 520, unit: 'KGS' },
+  { barcode: 'PRD-OT001', name: 'Oval Tumble', size: '5 MM OVAL', color: 'N-10', price: 180, unit: 'PAC' },
+  { barcode: 'PRD-SJ001', name: 'Small Cut Sujani', size: '3 MM SUJANI', color: 'T-30', price: 340, unit: 'KGS' },
 ];
 
 const STAFF_NAMES = ['Admin', 'Deepak', 'Sujata'];
@@ -132,11 +163,12 @@ export function generateOneYearDemoDataset(liveItems: StockItem[]): DemoDataset 
 
   const catalog: CatalogEntry[] =
     liveItems.length >= 4
-      ? liveItems.map(i => ({
+      ? liveItems.map((i, idx) => ({
           barcode: i.barcode,
           name: i.name,
           size: i.size || 'Standard',
           color: formatColorLabel(i.color),
+          price: i.price ?? (normalizeUnit(i.unit) === 'KGS' ? 380 + (idx % 4) * 30 : 220 + (idx % 5) * 20),
           unit: normalizeUnit(i.unit),
         }))
       : FALLBACK_CATALOG;
@@ -239,6 +271,8 @@ export function generateOneYearDemoDataset(liveItems: StockItem[]): DemoDataset 
         color: prod.color,
         qty,
         unit: prod.unit,
+        price: prod.price,
+        totalAmount: roundQty(qty * prod.price),
         source: 'MANUAL',
         doneBy: staff,
         customerName: customer,
@@ -294,6 +328,7 @@ export function generateOneYearDemoDataset(liveItems: StockItem[]): DemoDataset 
       name: prod.name,
       size: prod.size,
       color: prod.color,
+      price: prod.price,
       totalIn,
       totalOut,
       stock: roundQty(Math.max(0, totalIn - totalOut)),
