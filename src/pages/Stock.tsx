@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react';
 import { useStore, StockItem } from '../store';
 import QRLabelModal from '../components/QRLabelModal';
+import VoiceSearchButton from '../components/VoiceSearchButton';
+import { normalizeVoiceQuery } from '../utils/voiceHelper';
 import { AllowedUnit, normalizeUnit, roundQty, sanitizeDecimalInput } from '../utils/qrHelper';
 import {
   Package,
@@ -27,6 +29,7 @@ export default function Stock() {
     useStore();
   const isAdmin = currentUser?.role === 'Admin';
   const [search, setSearch] = useState('');
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Excel / CSV Upload Preview State
@@ -398,9 +401,40 @@ export default function Stock() {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search by Product Name, Unique Code, Size, or Color..."
-            className="w-full pl-11 pr-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 text-base"
+            className={`w-full pl-11 pr-20 py-2.5 border-2 rounded-xl focus:outline-none text-base transition-all ${
+              isVoiceListening
+                ? 'border-blue-500 ring-4 ring-blue-100 bg-blue-50/20'
+                : 'border-slate-200 focus:border-blue-500'
+            }`}
           />
+          <div className="absolute right-2 top-1.5 flex items-center gap-1">
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
+                title="Clear search"
+              >
+                <X size={16} />
+              </button>
+            )}
+            <VoiceSearchButton
+              size="sm"
+              buttonTitle="Voice search table (Bol kar search karein)"
+              onListeningStateChange={setIsVoiceListening}
+              onTranscript={spoken => {
+                const norm = normalizeVoiceQuery(spoken);
+                setSearch(norm);
+              }}
+            />
+          </div>
         </div>
+        {isVoiceListening && (
+          <div className="mt-2 flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-xl text-xs font-semibold text-blue-700 animate-pulse">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-ping shrink-0" />
+            <span>Listening... Speak product name, code, size, or color (Bol sakte hain...)</span>
+          </div>
+        )}
       </div>
 
       {/* Stock Table */}

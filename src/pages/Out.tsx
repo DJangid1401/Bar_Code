@@ -1,6 +1,8 @@
 import { useMemo, useState, useRef, useEffect } from 'react';
 import { useStore, StockItem } from '../store';
 import QRScanner from '../components/QRScanner';
+import VoiceSearchButton from '../components/VoiceSearchButton';
+import { findBestVoiceMatch } from '../utils/voiceHelper';
 import {
   DUMMY_CUSTOMERS,
   ENABLE_DEMO_MODE,
@@ -44,6 +46,11 @@ export default function Out() {
   const [priceInput, setPriceInput] = useState<string>('');
   const [qty, setQty] = useState<string>('1');
   const [outKgMode, setOutKgMode] = useState<OutKgMode>('PACKETS_500G');
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [voiceNotification, setVoiceNotification] = useState<{
+    text: string;
+    type: 'success' | 'info';
+  } | null>(null);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -209,6 +216,37 @@ export default function Out() {
     setSearchProduct('');
     setPriceInput('');
     setIsDropdownOpen(false);
+  };
+
+  const handleVoiceTranscript = (spokenText: string) => {
+    if (!spokenText.trim()) return;
+
+    const result = findBestVoiceMatch(spokenText, items);
+    const query = result.normalizedQuery || spokenText.trim();
+
+    if (result.match) {
+      // Auto-select product directly ("jaise hi voice mai bolu wo lele")
+      handleSelectProduct(result.match);
+      setVoiceNotification({
+        type: 'success',
+        text: `Voice heard: "${spokenText}" → Selected ${result.match.barcode} (${result.match.name}${result.match.size ? ` ${result.match.size}` : ''}${result.match.color ? ` ${formatColorLabel(result.match.color)}` : ''})`,
+      });
+    } else {
+      // Multiple or partial matches: update search and open dropdown so user sees all choices
+      setSearchProduct(query);
+      setIsDropdownOpen(true);
+      setVoiceNotification({
+        type: 'info',
+        text:
+          result.matches.length > 0
+            ? `Voice heard: "${spokenText}" → Found ${result.matches.length} matching products. Select below.`
+            : `Voice heard: "${spokenText}" → Showing matching products.`,
+      });
+    }
+
+    setTimeout(() => {
+      setVoiceNotification(null);
+    }, 6000);
   };
 
   const handleScanSuccess = (decodedText: string) => {
@@ -409,9 +447,16 @@ export default function Out() {
                 value={customerName}
                 onChange={e => setCustomerName(e.target.value)}
                 placeholder="Enter or select customer name (e.g. Shree Ganesh Traders)"
-                className="w-full pl-11 pr-4 py-3 border-2 border-slate-200 rounded-xl text-base focus:border-red-500 focus:outline-none"
+                className="w-full pl-11 pr-14 py-3 border-2 border-slate-200 rounded-xl text-base focus:border-red-500 focus:outline-none"
                 required
               />
+              <div className="absolute right-2 top-2">
+                <VoiceSearchButton
+                  size="sm"
+                  buttonTitle="Customer name bol kar likhein"
+                  onTranscript={spoken => setCustomerName(spoken.trim())}
+                />
+              </div>
               <datalist id="customer-name-suggestions">
                 {customerSuggestions.map(cust => (
                   <option key={cust.name} value={cust.name}>
@@ -447,17 +492,63 @@ export default function Out() {
                 onChange={e => handleSearchChange(e.target.value)}
                 onFocus={() => setIsDropdownOpen(true)}
                 placeholder="Search Unique Code, Product Name, Size, or Color..."
-                className="w-full pl-11 pr-10 py-3 border-2 border-slate-200 rounded-xl text-base font-semibold focus:border-red-500 focus:outline-none"
+                className={`w-full pl-11 pr-24 py-3 border-2 rounded-xl text-base font-semibold focus:outline-none transition-all ${
+                  isVoiceListening
+                    ? 'border-red-500 ring-4 ring-red-100 bg-red-50/20'
+                    : 'border-slate-200 focus:border-red-500'
+                }`}
                 required
               />
-              <button
-                type="button"
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                <ChevronDown size={18} className={`transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
+              <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                <VoiceSearchButton
+                  size="sm"
+                  buttonTitle="Voice search: Bol kar product select karein"
+                  onListeningStateChange={setIsVoiceListening}
+                  onTranscript={handleVoiceTranscript}
+                />
+                <button
+                  type="button"
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
+                  title="Toggle product list"
+                >
+                  <ChevronDown
+                    size={18}
+                    className={`transition-transform duration-200 ${
+                      isDropdownOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
+
+            {/* Live Voice Listening Pulse */}
+            {isVoiceListening && (
+              <div className="mt-1.5 flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-xl text-xs font-semibold text-red-700 animate-pulse">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping shrink-0" />
+                <span>Listening... Speak product code (e.g. PRD-0020), name, size, or color (Bol sakte hain...)</span>
+              </div>
+            )}
+
+            {/* Voice Notification Banner */}
+            {voiceNotification && (
+              <div
+                className={`mt-1.5 flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold border ${
+                  voiceNotification.type === 'success'
+                    ? 'bg-green-50 border-green-200 text-green-800'
+                    : 'bg-blue-50 border-blue-200 text-blue-800'
+                }`}
+              >
+                <span>{voiceNotification.text}</span>
+                <button
+                  type="button"
+                  onClick={() => setVoiceNotification(null)}
+                  className="text-slate-400 hover:text-slate-600 ml-2"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
 
             {/* Dropdown Menu showing Unique Code + Product Name + Size + Color */}
             {isDropdownOpen && (
