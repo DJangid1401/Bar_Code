@@ -1,9 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useStore, StockItem } from '../store';
 import QRLabelModal from '../components/QRLabelModal';
 import VoiceSearchButton from '../components/VoiceSearchButton';
 import { normalizeVoiceQuery } from '../utils/voiceHelper';
 import { AllowedUnit, normalizeUnit, roundQty, sanitizeDecimalInput } from '../utils/qrHelper';
+import { formatColorLabel } from '../utils/demoSalesData';
 import {
   Package,
   Search,
@@ -18,6 +19,7 @@ import {
   QrCode,
   Printer,
   IndianRupee,
+  RotateCcw,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -66,16 +68,132 @@ export default function Stock() {
   // Delete Modal State
   const [deletingItem, setDeletingItem] = useState<StockItem | null>(null);
 
-  // Search filter
-  const filteredItems = items.filter(i => {
-    const query = search.toLowerCase();
-    return (
-      i.name.toLowerCase().includes(query) ||
-      i.barcode.toLowerCase().includes(query) ||
-      (i.size && i.size.toLowerCase().includes(query)) ||
-      (i.color && i.color.toLowerCase().includes(query))
-    );
-  });
+  // Filter States for Stock list & QR
+  const [selectedProduct, setSelectedProduct] = useState<string>('ALL');
+  const [selectedSize, setSelectedSize] = useState<string>('ALL');
+  const [selectedColor, setSelectedColor] = useState<string>('ALL');
+  const [stockStatus, setStockStatus] = useState<'ALL' | 'IN_STOCK' | 'OUT_OF_STOCK'>('ALL');
+  const [selectedUnit, setSelectedUnit] = useState<string>('ALL');
+
+  // Dynamic filter dropdown options
+  const productOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of items) {
+      const clean = (item.name || '').trim();
+      if (clean) set.add(clean);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
+  const sizeOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of items) {
+      if (
+        selectedProduct !== 'ALL' &&
+        item.name.trim().toLowerCase() !== selectedProduct.toLowerCase()
+      ) {
+        continue;
+      }
+      const clean = (item.size || '').trim();
+      if (clean) set.add(clean);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [items, selectedProduct]);
+
+  const colorOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of items) {
+      if (
+        selectedProduct !== 'ALL' &&
+        item.name.trim().toLowerCase() !== selectedProduct.toLowerCase()
+      ) {
+        continue;
+      }
+      const clean = (item.color || '').trim();
+      if (clean) set.add(clean);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [items, selectedProduct]);
+
+  const unitOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of items) {
+      const u = normalizeUnit(item.unit);
+      if (u) set.add(u);
+    }
+    return Array.from(set).sort();
+  }, [items]);
+
+  // Combined Multi-Criteria Filter (Search + Product + Size + Color + Stock Status + Unit)
+  const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+
+    return items.filter(i => {
+      // 1. Product Filter
+      if (
+        selectedProduct !== 'ALL' &&
+        i.name.trim().toLowerCase() !== selectedProduct.toLowerCase()
+      ) {
+        return false;
+      }
+
+      // 2. Size Filter
+      if (
+        selectedSize !== 'ALL' &&
+        (i.size || '').trim().toLowerCase() !== selectedSize.toLowerCase()
+      ) {
+        return false;
+      }
+
+      // 3. Color Filter
+      if (
+        selectedColor !== 'ALL' &&
+        (i.color || '').trim().toLowerCase() !== selectedColor.toLowerCase()
+      ) {
+        return false;
+      }
+
+      // 4. Stock Availability Filter
+      if (stockStatus === 'IN_STOCK' && i.stock <= 0) return false;
+      if (stockStatus === 'OUT_OF_STOCK' && i.stock > 0) return false;
+
+      // 5. Unit Filter
+      if (selectedUnit !== 'ALL' && normalizeUnit(i.unit) !== selectedUnit) {
+        return false;
+      }
+
+      // 6. Text / Voice Search Query
+      if (q) {
+        const colorFormatted = formatColorLabel(i.color).toLowerCase();
+        const matches =
+          i.name.toLowerCase().includes(q) ||
+          i.barcode.toLowerCase().includes(q) ||
+          (i.size && i.size.toLowerCase().includes(q)) ||
+          (i.color && i.color.toLowerCase().includes(q)) ||
+          colorFormatted.includes(q);
+        if (!matches) return false;
+      }
+
+      return true;
+    });
+  }, [items, search, selectedProduct, selectedSize, selectedColor, stockStatus, selectedUnit]);
+
+  const hasActiveFilters =
+    Boolean(search.trim()) ||
+    selectedProduct !== 'ALL' ||
+    selectedSize !== 'ALL' ||
+    selectedColor !== 'ALL' ||
+    stockStatus !== 'ALL' ||
+    selectedUnit !== 'ALL';
+
+  const handleResetFilters = () => {
+    setSearch('');
+    setSelectedProduct('ALL');
+    setSelectedSize('ALL');
+    setSelectedColor('ALL');
+    setStockStatus('ALL');
+    setSelectedUnit('ALL');
+  };
 
   const totalStockCount = roundQty(items.reduce((acc, curr) => acc + curr.stock, 0));
 
@@ -109,11 +227,14 @@ export default function Stock() {
       return;
     }
 
-    setQrModalTitle(
+    const title =
       selectedBarcodes.length > 0
-        ? `Selected QR Labels (${targetItems.length})`
-        : `All Product QR Labels (${targetItems.length})`
-    );
+        ? `Selected QR Labels (${targetItems.length} Products)`
+        : hasActiveFilters
+        ? `Filtered QR Labels (${targetItems.length} of ${items.length} Products)`
+        : `All Product QR Labels (${targetItems.length} Products)`;
+
+    setQrModalTitle(title);
     setQrModalItems(targetItems);
   };
 
@@ -342,14 +463,16 @@ export default function Stock() {
             type="button"
             onClick={handleOpenBatchQR}
             disabled={filteredItems.length === 0}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-colors cursor-pointer"
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm transition-all active:scale-[0.98] cursor-pointer"
             title="View & Print QR Labels"
           >
             <Printer size={16} />
             <span>
               {selectedBarcodes.length > 0
-                ? `Print QR (${selectedBarcodes.length})`
-                : 'Print All QR'}
+                ? `Print Selected QR (${selectedBarcodes.length})`
+                : hasActiveFilters
+                ? `Print Filtered QR (${filteredItems.length})`
+                : `Print All QR (${items.length})`}
             </span>
           </button>
 
@@ -436,6 +559,115 @@ export default function Stock() {
             <span>Listening... Speak product name, code, size, or color (Bol sakte hain...)</span>
           </div>
         )}
+
+        {/* Multi-Criteria Filter Controls Toolbar */}
+        <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2.5 text-xs">
+          {/* Product Filter */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+            <span className="font-bold text-slate-500 uppercase text-[10px]">Product:</span>
+            <select
+              value={selectedProduct}
+              onChange={e => {
+                setSelectedProduct(e.target.value);
+                setSelectedSize('ALL');
+                setSelectedColor('ALL');
+              }}
+              className="bg-transparent font-semibold text-slate-800 focus:outline-none cursor-pointer pr-1"
+            >
+              <option value="ALL">All Products ({productOptions.length})</option>
+              {productOptions.map(p => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Size Filter */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+            <span className="font-bold text-slate-500 uppercase text-[10px]">Size:</span>
+            <select
+              value={selectedSize}
+              onChange={e => setSelectedSize(e.target.value)}
+              className="bg-transparent font-semibold text-slate-800 focus:outline-none cursor-pointer pr-1 max-w-[170px]"
+            >
+              <option value="ALL">All Sizes ({sizeOptions.length})</option>
+              {sizeOptions.map(s => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Color Filter */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+            <span className="font-bold text-slate-500 uppercase text-[10px]">Color:</span>
+            <select
+              value={selectedColor}
+              onChange={e => setSelectedColor(e.target.value)}
+              className="bg-transparent font-semibold text-slate-800 focus:outline-none cursor-pointer pr-1 max-w-[150px]"
+            >
+              <option value="ALL">All Colors ({colorOptions.length})</option>
+              {colorOptions.map(c => (
+                <option key={c} value={c}>
+                  {formatColorLabel(c)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Stock Status Filter */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+            <span className="font-bold text-slate-500 uppercase text-[10px]">Stock:</span>
+            <select
+              value={stockStatus}
+              onChange={e => setStockStatus(e.target.value as 'ALL' | 'IN_STOCK' | 'OUT_OF_STOCK')}
+              className="bg-transparent font-semibold text-slate-800 focus:outline-none cursor-pointer pr-1"
+            >
+              <option value="ALL">All Stock</option>
+              <option value="IN_STOCK">In Stock (&gt; 0)</option>
+              <option value="OUT_OF_STOCK">Out of Stock (= 0)</option>
+            </select>
+          </div>
+
+          {/* Unit Filter */}
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+            <span className="font-bold text-slate-500 uppercase text-[10px]">Unit:</span>
+            <select
+              value={selectedUnit}
+              onChange={e => setSelectedUnit(e.target.value)}
+              className="bg-transparent font-semibold text-slate-800 focus:outline-none cursor-pointer pr-1"
+            >
+              <option value="ALL">All Units</option>
+              {unitOptions.map(u => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Count & Reset */}
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-slate-500 font-medium text-xs">
+              Showing <strong className="text-slate-900 font-bold">{filteredItems.length}</strong> of{' '}
+              {items.length} products
+            </span>
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                title="Reset all filters"
+              >
+                <RotateCcw size={12} />
+                <span>Reset</span>
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Stock Table */}

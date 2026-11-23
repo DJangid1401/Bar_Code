@@ -1,12 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import {
-  ENABLE_DEMO_MODE,
-  formatColorLabel,
-  generateOneYearDemoDataset,
-  getSavedDemoMode,
-  setSavedDemoMode,
-} from '../utils/demoSalesData';
+import { formatColorLabel } from '../utils/demoSalesData';
 import { normalizeUnit, roundQty } from '../utils/qrHelper';
 import VoiceSearchButton from '../components/VoiceSearchButton';
 import { normalizeVoiceQuery } from '../utils/voiceHelper';
@@ -20,8 +14,6 @@ import {
   Search,
   Filter,
   Users,
-  Sparkles,
-  Database,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -32,20 +24,18 @@ const ORDERS_PER_PAGE = 20;
 
 export default function Sales() {
   const { items: liveItems, logs: liveLogs, isLoading } = useStore();
-  const [useDemoData, setUseDemoData] = useState<boolean>(() => getSavedDemoMode());
   const [selectedProduct, setSelectedProduct] = useState<string>('ALL');
   const [selectedCustomer, setSelectedCustomer] = useState<string>('ALL');
   const [dateFilter, setDateFilter] = useState<DateRangeFilter>({ preset: '365D' });
   const [orderSearch, setOrderSearch] = useState<string>('');
   const [page, setPage] = useState<number>(1);
 
-  const demoDataset = useMemo(
-    () => (ENABLE_DEMO_MODE && useDemoData ? generateOneYearDemoDataset(liveItems) : null),
-    [liveItems, useDemoData]
+  // 100% Live data strictly from Google Sheets (excluding any dummy/demo records)
+  const activeItems = liveItems;
+  const activeLogs = useMemo(
+    () => liveLogs.filter(l => !l.id?.startsWith('demo-')),
+    [liveLogs]
   );
-
-  const activeItems = demoDataset ? demoDataset.items : liveItems;
-  const activeLogs = demoDataset ? demoDataset.logs : liveLogs;
 
   // All OUT (Sales) logs
   const salesLogs = useMemo(
@@ -212,45 +202,6 @@ export default function Sales() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            {ENABLE_DEMO_MODE && (
-              <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUseDemoData(true);
-                    setSavedDemoMode(true);
-                    setSelectedCustomer('ALL');
-                    setPage(1);
-                  }}
-                  className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                    useDemoData
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Sparkles size={14} />
-                  <span>1-Year Demo (100 Customers • 10/day)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUseDemoData(false);
-                    setSavedDemoMode(false);
-                    setSelectedCustomer('ALL');
-                    setPage(1);
-                  }}
-                  className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                    !useDemoData
-                      ? 'bg-slate-900 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Database size={14} />
-                  <span>Live Data Only</span>
-                </button>
-              </div>
-            )}
-
             <button
               type="button"
               onClick={handleExportCsv}

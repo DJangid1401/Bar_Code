@@ -1,11 +1,5 @@
 import { useMemo, useState } from 'react';
 import { useStore, StockItem, Transaction } from '../store';
-import {
-  ENABLE_DEMO_MODE,
-  generateOneYearDemoDataset,
-  getSavedDemoMode,
-  setSavedDemoMode,
-} from '../utils/demoSalesData';
 import { normalizeUnit, roundQty } from '../utils/qrHelper';
 import VoiceSearchButton from '../components/VoiceSearchButton';
 import { normalizeVoiceQuery, stringSimilarity } from '../utils/voiceHelper';
@@ -35,8 +29,6 @@ import {
   Ruler,
   Package,
   Users,
-  Sparkles,
-  Database,
 } from 'lucide-react';
 
 const CHART_PALETTE = [
@@ -164,19 +156,16 @@ function buildRankingFromLogsOrItems(
 
 export default function Dashboard() {
   const { items: liveItems, logs: liveLogs, isLoading } = useStore();
-  const [useDemoData, setUseDemoData] = useState<boolean>(() => getSavedDemoMode());
   const [selectedProduct, setSelectedProduct] = useState<string>('ALL');
   const [selectedCustomer, setSelectedCustomer] = useState<string>('ALL');
   const [dateFilter, setDateFilter] = useState<DateRangeFilter>({ preset: '365D' });
 
-  // Generate 1-year dummy dataset only when Demo Mode is active
-  const demoDataset = useMemo(
-    () => (ENABLE_DEMO_MODE && useDemoData ? generateOneYearDemoDataset(liveItems) : null),
-    [liveItems, useDemoData]
+  // 100% Live data strictly from Google Sheets (no dummy/demo datasets)
+  const activeItems = liveItems;
+  const activeLogs = useMemo(
+    () => liveLogs.filter(l => !l.id?.startsWith('demo-')),
+    [liveLogs]
   );
-
-  const activeItems = demoDataset ? demoDataset.items : liveItems;
-  const activeLogs = demoDataset ? demoDataset.logs : liveLogs;
 
   // Unique product names for dropdown
   const productOptions = useMemo(() => {
@@ -358,44 +347,6 @@ export default function Dashboard() {
               Product, Size &amp; Customer sales intelligence ({rangeLabel}).
             </p>
           </div>
-
-          {/* Demo 1-Year vs Live Sheet Toggle */}
-          {ENABLE_DEMO_MODE && (
-            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-              <button
-                type="button"
-                onClick={() => {
-                  setUseDemoData(true);
-                  setSavedDemoMode(true);
-                  setSelectedCustomer('ALL');
-                }}
-                className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  useDemoData
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Sparkles size={14} />
-                <span>1-Year Demo (100 Customers • 10/day)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setUseDemoData(false);
-                  setSavedDemoMode(false);
-                  setSelectedCustomer('ALL');
-                }}
-                className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  !useDemoData
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Database size={14} />
-                <span>Live Data Only</span>
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Filter Controls Row */}

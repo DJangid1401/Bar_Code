@@ -4,28 +4,19 @@ import { AllowedUnit, normalizeUnit, roundQty } from './qrHelper';
 
 /**
  * MASTER SWITCH FOR DUMMY DEMO DATA:
- * Set this to `false` to permanently remove/hide all 1-year dummy customer data
- * from the Dashboard and Stock OUT autocomplete across the entire app.
+ * Permanently disabled as per user instruction. Only live synced sheet data is used.
  */
-export const ENABLE_DEMO_MODE = true;
+export const ENABLE_DEMO_MODE = false;
 
 const DEMO_MODE_STORAGE_KEY = 'swati_demo_mode_enabled';
 
 export function getSavedDemoMode(): boolean {
-  if (!ENABLE_DEMO_MODE) return false;
-  try {
-    const saved = localStorage.getItem(DEMO_MODE_STORAGE_KEY);
-    if (saved === 'false') return false;
-    if (saved === 'true') return true;
-  } catch {
-    // ignore storage errors
-  }
-  return true;
+  return false;
 }
 
-export function setSavedDemoMode(enabled: boolean): void {
+export function setSavedDemoMode(_enabled: boolean): void {
   try {
-    localStorage.setItem(DEMO_MODE_STORAGE_KEY, enabled ? 'true' : 'false');
+    localStorage.setItem(DEMO_MODE_STORAGE_KEY, 'false');
   } catch {
     // ignore storage errors
   }

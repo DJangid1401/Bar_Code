@@ -4,9 +4,6 @@ import QRScanner from '../components/QRScanner';
 import VoiceSearchButton from '../components/VoiceSearchButton';
 import { findBestVoiceMatch } from '../utils/voiceHelper';
 import {
-  DUMMY_CUSTOMERS,
-  ENABLE_DEMO_MODE,
-  getSavedDemoMode,
   formatColorLabel,
   FALLBACK_CATALOG,
   CatalogEntry,
@@ -69,7 +66,7 @@ export default function Out() {
     };
   }, [isDropdownOpen]);
 
-  // Combined customer suggestions: from Customer DB + past logs + demo customers
+  // Real customer suggestions strictly from registered Customer DB + real past sales logs
   const customerSuggestions = useMemo(() => {
     const list: Array<{ name: string; label: string }> = [];
     const seen = new Set<string>();
@@ -77,7 +74,7 @@ export default function Out() {
     // 1. Registered Customer DB records
     for (const c of customers) {
       const trimmed = c.name.trim();
-      if (!trimmed || seen.has(trimmed.toLowerCase())) continue;
+      if (!trimmed || trimmed.toLowerCase() === 'test' || seen.has(trimmed.toLowerCase())) continue;
       seen.add(trimmed.toLowerCase());
       list.push({
         name: trimmed,
@@ -85,22 +82,13 @@ export default function Out() {
       });
     }
 
-    // 2. Past transaction logs
+    // 2. Real past transaction logs only (excluding any demo data)
     for (const log of logs) {
+      if (log.id?.startsWith('demo-')) continue;
       const trimmed = (log.customerName || '').trim();
-      if (!trimmed || seen.has(trimmed.toLowerCase())) continue;
+      if (!trimmed || trimmed.toLowerCase() === 'test' || seen.has(trimmed.toLowerCase())) continue;
       seen.add(trimmed.toLowerCase());
       list.push({ name: trimmed, label: trimmed });
-    }
-
-    // 3. Demo customers (if enabled)
-    if (ENABLE_DEMO_MODE && getSavedDemoMode()) {
-      for (const d of DUMMY_CUSTOMERS) {
-        if (!seen.has(d.toLowerCase())) {
-          seen.add(d.toLowerCase());
-          list.push({ name: d, label: d });
-        }
-      }
     }
 
     return list.sort((a, b) => a.name.localeCompare(b.name));
