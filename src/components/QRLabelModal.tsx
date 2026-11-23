@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { StockItem } from '../store';
+import { StockItem, useStore } from '../store';
 import { generateQRDataUrl } from '../utils/qrHelper';
-import { X, Printer, QrCode, Download, Copy } from 'lucide-react';
+import { X, Printer, QrCode, Download, Copy, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 interface QRLabelModalProps {
   items: StockItem[];
   onClose: () => void;
   title?: string;
+  initialAutoStockIn?: boolean;
 }
 
 type GeneratedLabel = {
@@ -18,11 +19,19 @@ export default function QRLabelModal({
   items,
   onClose,
   title = 'Printable QR Labels',
+  initialAutoStockIn = true,
 }: QRLabelModalProps) {
+  const { scanIn, bulkStockIn } = useStore();
   const [labels, setLabels] = useState<GeneratedLabel[]>([]);
   const [copiesInput, setCopiesInput] = useState<string>('1');
   const [loading, setLoading] = useState<boolean>(true);
-  const copiesPerItem = Math.max(1, Math.min(50, parseInt(copiesInput, 10) || 1));
+  const [autoStockIn, setAutoStockIn] = useState<boolean>(initialAutoStockIn);
+  const [isSubmittingStockIn, setIsSubmittingStockIn] = useState<boolean>(false);
+  const [stockInSuccessMessage, setStockInSuccessMessage] = useState<string | null>(null);
+  const [stockInErrorMessage, setStockInErrorMessage] = useState<string | null>(null);
+
+  const parsedCopies = parseInt(copiesInput, 10);
+  const copiesPerItem = Math.max(1, Math.min(1000, isNaN(parsedCopies) ? 1 : parsedCopies));
 
   useEffect(() => {
     let active = true;
@@ -155,6 +164,65 @@ export default function QRLabelModal({
     printWindow.document.close();
   };
 
+  const handlePrintAndProcessStockIn = async () => {
+    // 1. Immediately trigger the print dialog so popups are not blocked
+    handlePrint();
+
+    // 2. If autoStockIn is checked, automatically record as Stock IN
+    if (autoStockIn && items.length > 0) {
+      setIsSubmittingStockIn(true);
+      setStockInSuccessMessage(null);
+      setStockInErrorMessage(null);
+
+      try {
+        if (items.length === 1) {
+          const single = items[0];
+          const res = await scanIn({
+            barcode: single.barcode,
+            name: single.name,
+            qty: copiesPerItem,
+            size: single.size,
+            color: single.color,
+            unit: single.unit,
+            source: 'SCAN',
+          });
+
+          if (res.success) {
+            setStockInSuccessMessage(
+              `✅ Stock IN Updated: +${copiesPerItem} ${single.unit || 'PCS'} added to "${single.name}" (${single.barcode})`
+            );
+          } else {
+            setStockInErrorMessage(res.message || 'Failed to update Stock IN.');
+          }
+        } else {
+          // Multiple items
+          const entries = items.map(item => ({
+            barcode: item.barcode,
+            name: item.name,
+            size: item.size,
+            color: item.color,
+            qty: copiesPerItem,
+            unit: item.unit,
+          }));
+
+          const res = await bulkStockIn(entries);
+          if (res.count > 0) {
+            setStockInSuccessMessage(
+              `✅ Stock IN Updated: +${copiesPerItem} each added to ${items.length} products (Total: +${items.length * copiesPerItem})`
+            );
+          } else {
+            setStockInErrorMessage(res.message || 'Failed to update Stock IN.');
+          }
+        }
+      } catch (err) {
+        console.error('Stock IN update failed:', err);
+        setStockInErrorMessage('An error occurred while updating Stock IN.');
+      } finally {
+        setIsSubmittingStockIn(false);
+      }
+    }
+  };
+
   const handleDownloadSingle = (label: GeneratedLabel) => {
     // 30mm x 30mm QR at 300 DPI = 354 x 354 px
     const canvas = document.createElement('canvas');
@@ -233,7 +301,7 @@ export default function QRLabelModal({
                 if (!digits) {
                   setCopiesInput('');
                 } else {
-                  setCopiesInput(String(Math.min(50, parseInt(digits, 10))));
+                  setCopiesInput(String(Math.min(1000, parseInt(digits, 10))));
                 }
               }}
               onBlur={() => {
@@ -248,16 +316,80 @@ export default function QRLabelModal({
             </span>
           </div>
 
-          <button
-            type="button"
-            onClick={handlePrint}
-            disabled={loading || labels.length === 0}
-            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-xl text-sm flex items-center gap-2 shadow-md transition-colors cursor-pointer"
-          >
-            <Printer size={18} />
-            <span>Print QR Labels ({labels.length * copiesPerItem})</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold cursor-pointer hover:bg-emerald-100 transition-colors select-none">
+              <input
+                type="checkbox"
+                checked={autoStockIn}
+                onChange={e => setAutoStockIn(e.target.checked)}
+                className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer accent-emerald-600"
+              />
+              <span>
+                Record as Stock IN (+{copiesPerItem * items.length}{' '}
+                {items.length === 1 && items[0].unit ? items[0].unit : 'items'} on print)
+              </span>
+            </label>
+
+            <button
+              type="button"
+              onClick={handlePrintAndProcessStockIn}
+              disabled={loading || labels.length === 0 || isSubmittingStockIn}
+              className={`text-white font-bold px-5 py-2.5 rounded-xl text-sm flex items-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 ${
+                autoStockIn ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'
+              }`}
+            >
+              {isSubmittingStockIn ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  <span>Recording Stock IN...</span>
+                </>
+              ) : (
+                <>
+                  <Printer size={18} />
+                  <span>
+                    {autoStockIn
+                      ? `Print & Add to Stock IN (+${labels.length * copiesPerItem})`
+                      : `Print QR Labels (${labels.length * copiesPerItem})`}
+                  </span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
+
+        {/* Success Alert Banner */}
+        {stockInSuccessMessage && (
+          <div className="mx-6 mt-3 p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-between gap-2 shadow-xs">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+              <span>{stockInSuccessMessage}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setStockInSuccessMessage(null)}
+              className="text-emerald-700 hover:text-emerald-900 p-1 rounded-md cursor-pointer"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        )}
+
+        {/* Error Alert Banner */}
+        {stockInErrorMessage && (
+          <div className="mx-6 mt-3 p-3 bg-red-50 border border-red-200 text-red-900 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-between gap-2 shadow-xs">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={18} className="text-red-600 shrink-0" />
+              <span>{stockInErrorMessage}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setStockInErrorMessage(null)}
+              className="text-red-700 hover:text-red-900 p-1 rounded-md cursor-pointer"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        )}
 
         {/* Preview Grid */}
         <div className="p-6 overflow-y-auto bg-slate-50/70 flex-1">

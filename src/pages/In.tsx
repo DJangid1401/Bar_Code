@@ -548,6 +548,7 @@ export default function In() {
           items={[lastSavedItem]}
           onClose={() => setShowQRModal(false)}
           title={`QR Label — ${lastSavedItem.barcode}`}
+          initialAutoStockIn={false}
         />
       )}
     </div>

@@ -52,6 +52,7 @@ export default function Stock() {
   // QR Label Modal State
   const [qrModalItems, setQrModalItems] = useState<StockItem[] | null>(null);
   const [qrModalTitle, setQrModalTitle] = useState<string>('Printable QR Labels');
+  const [qrModalAutoStockIn, setQrModalAutoStockIn] = useState<boolean>(true);
 
   // Row selection for batch QR printing
   const [selectedBarcodes, setSelectedBarcodes] = useState<string[]>([]);
@@ -236,6 +237,7 @@ export default function Stock() {
 
     setQrModalTitle(title);
     setQrModalItems(targetItems);
+    setQrModalAutoStockIn(true);
   };
 
   // Download Sample Template (Manual Unique Code + PCS / KGS / PAC)
@@ -383,6 +385,7 @@ export default function Stock() {
         `Auto-Generated QR Labels (${result.importedItems.length} Imported Items)`
       );
       setQrModalItems(result.importedItems);
+      setQrModalAutoStockIn(false);
     } else {
       alert(result.message);
     }
@@ -772,6 +775,7 @@ export default function Stock() {
                           onClick={() => {
                             setQrModalTitle(`QR Label — ${item.barcode}`);
                             setQrModalItems([item]);
+                            setQrModalAutoStockIn(true);
                           }}
                           className="text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 text-xs font-bold border border-indigo-200"
                           title="Generate & Print QR Code"
@@ -1111,6 +1115,7 @@ export default function Stock() {
           items={qrModalItems}
           onClose={() => setQrModalItems(null)}
           title={qrModalTitle}
+          initialAutoStockIn={qrModalAutoStockIn}
         />
       )}
     </div>
