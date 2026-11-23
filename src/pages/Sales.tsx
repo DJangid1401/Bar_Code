@@ -8,6 +8,8 @@ import {
   setSavedDemoMode,
 } from '../utils/demoSalesData';
 import { normalizeUnit, roundQty } from '../utils/qrHelper';
+import VoiceSearchButton from '../components/VoiceSearchButton';
+import { normalizeVoiceQuery } from '../utils/voiceHelper';
 import DateRangePicker, {
   DateRangeFilter,
   isTimestampInRange,
@@ -23,6 +25,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  X,
 } from 'lucide-react';
 
 const ORDERS_PER_PAGE = 20;
@@ -389,8 +392,32 @@ export default function Sales() {
                 setPage(1);
               }}
               placeholder="Search customer, product, size, color..."
-              className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+              className="w-full pl-9 pr-20 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-blue-500"
             />
+            <div className="absolute right-1.5 top-1 flex items-center gap-1">
+              {orderSearch && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOrderSearch('');
+                    setPage(1);
+                  }}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                  title="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+              <VoiceSearchButton
+                size="sm"
+                buttonTitle="Search sales orders by voice"
+                showLangToggle={true}
+                onTranscript={spoken => {
+                  setOrderSearch(normalizeVoiceQuery(spoken));
+                  setPage(1);
+                }}
+              />
+            </div>
           </div>
         </div>
 

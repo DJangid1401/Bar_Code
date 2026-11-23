@@ -7,6 +7,8 @@ import {
   setSavedDemoMode,
 } from '../utils/demoSalesData';
 import { normalizeUnit, roundQty } from '../utils/qrHelper';
+import VoiceSearchButton from '../components/VoiceSearchButton';
+import { normalizeVoiceQuery, stringSimilarity } from '../utils/voiceHelper';
 import DateRangePicker, {
   DateRangeFilter,
   isTimestampInRange,
@@ -293,6 +295,55 @@ export default function Dashboard() {
 
   const rangeLabel = getDateRangeLabel(dateFilter);
 
+  const handleDashboardVoiceFilter = (spoken: string) => {
+    const q = normalizeVoiceQuery(spoken).toLowerCase().trim();
+    if (!q) return;
+
+    if (q === 'all' || q === 'clear' || q === 'reset' || q === 'sab' || q === 'saare') {
+      setSelectedProduct('ALL');
+      setSelectedCustomer('ALL');
+      return;
+    }
+
+    let bestProduct: string | null = null;
+    let bestProductScore = 0;
+    for (const prod of productOptions) {
+      const pLower = prod.toLowerCase();
+      if (pLower === q || q.includes(pLower) || pLower.includes(q)) {
+        bestProduct = prod;
+        bestProductScore = 1.0;
+        break;
+      }
+      const sim = stringSimilarity(q, pLower);
+      if (sim > bestProductScore && sim >= 0.7) {
+        bestProduct = prod;
+        bestProductScore = sim;
+      }
+    }
+
+    let bestCustomer: string | null = null;
+    let bestCustomerScore = 0;
+    for (const cust of customerOptions) {
+      const cLower = cust.toLowerCase();
+      if (cLower === q || q.includes(cLower) || cLower.includes(q)) {
+        bestCustomer = cust;
+        bestCustomerScore = 1.0;
+        break;
+      }
+      const sim = stringSimilarity(q, cLower);
+      if (sim > bestCustomerScore && sim >= 0.7) {
+        bestCustomer = cust;
+        bestCustomerScore = sim;
+      }
+    }
+
+    if (bestProductScore >= bestCustomerScore && bestProduct) {
+      setSelectedProduct(bestProduct);
+    } else if (bestCustomer) {
+      setSelectedCustomer(bestCustomer);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-12">
       {/* Header & Data Source Switcher */}
@@ -395,6 +446,19 @@ export default function Dashboard() {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Voice Filter Button */}
+          <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5">
+            <VoiceSearchButton
+              size="sm"
+              buttonTitle="Voice Filter: Bol kar product ya customer filter karein (e.g. Tyre, Ambika, All)"
+              showLangToggle={true}
+              onTranscript={handleDashboardVoiceFilter}
+            />
+            <span className="text-[11px] font-bold text-slate-500 pr-1 hidden sm:inline">
+              Voice Filter
+            </span>
           </div>
 
           {/* Interactive Date Range Picker with Working Calendar */}

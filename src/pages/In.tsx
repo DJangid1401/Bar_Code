@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useStore, StockItem } from '../store';
 import QRScanner from '../components/QRScanner';
 import QRLabelModal from '../components/QRLabelModal';
+import VoiceSearchButton from '../components/VoiceSearchButton';
+import { normalizeVoiceQuery, findBestVoiceMatch } from '../utils/voiceHelper';
 import {
   AllowedUnit,
   normalizeUnit,
@@ -215,17 +217,40 @@ export default function In() {
             <label className="block text-sm font-semibold text-slate-700 mb-1">
               Unique Product Code *
             </label>
-            <input
-              type="text"
-              value={barcode}
-              onChange={e => {
-                setBarcode(e.target.value);
-                setLastScanned(null);
-              }}
-              placeholder="Enter product code (e.g. PRD-HM001)"
-              className="w-full border-2 border-slate-200 p-3 rounded-xl text-base font-mono focus:border-green-500 focus:outline-none"
-              required
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={barcode}
+                onChange={e => {
+                  setBarcode(e.target.value);
+                  setLastScanned(null);
+                }}
+                placeholder="Enter product code (e.g. PRD-HM001)"
+                className="w-full border-2 border-slate-200 p-3 pr-14 rounded-xl text-base font-mono focus:border-green-500 focus:outline-none"
+                required
+              />
+              <div className="absolute right-2.5 top-2.5">
+                <VoiceSearchButton
+                  size="sm"
+                  buttonTitle="Unique product code bol kar enter karein"
+                  showLangToggle={true}
+                  onTranscript={(spoken, alternatives) => {
+                    const norm = normalizeVoiceQuery(spoken);
+                    const matchRes = findBestVoiceMatch(spoken, items, alternatives);
+                    if (matchRes.match) {
+                      setBarcode(matchRes.match.barcode);
+                      setName(matchRes.match.name);
+                      setSize(matchRes.match.size || '');
+                      setColor(matchRes.match.color || '');
+                      setUnit(normalizeUnit(matchRes.match.unit));
+                    } else {
+                      setBarcode(norm);
+                    }
+                    setLastScanned(null);
+                  }}
+                />
+              </div>
+            </div>
           </div>
 
           {/* Product Name / Category */}
@@ -233,14 +258,23 @@ export default function In() {
             <label className="block text-sm font-semibold text-slate-700 mb-1">
               Product Name / Category *
             </label>
-            <input
-              type="text"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="e.g. HOLE MOTI, TYRE"
-              className="w-full border-2 border-slate-200 p-3 rounded-xl text-base focus:border-green-500 focus:outline-none"
-              required
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="e.g. HOLE MOTI, TYRE"
+                className="w-full border-2 border-slate-200 p-3 pr-14 rounded-xl text-base focus:border-green-500 focus:outline-none"
+                required
+              />
+              <div className="absolute right-2.5 top-2.5">
+                <VoiceSearchButton
+                  size="sm"
+                  buttonTitle="Product name bol kar likhein"
+                  onTranscript={spoken => setName(normalizeVoiceQuery(spoken))}
+                />
+              </div>
+            </div>
           </div>
 
           {/* Size and Color (2 columns) */}
@@ -249,26 +283,44 @@ export default function In() {
               <label className="block text-sm font-semibold text-slate-700 mb-1">
                 Size (Optional)
               </label>
-              <input
-                type="text"
-                value={size}
-                onChange={e => setSize(e.target.value)}
-                placeholder="e.g. 6 MM HOLE MOTI, 2.5 MM"
-                className="w-full border-2 border-slate-200 p-3 rounded-xl text-base focus:border-green-500 focus:outline-none"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  value={size}
+                  onChange={e => setSize(e.target.value)}
+                  placeholder="e.g. 6 MM HOLE MOTI, 2.5 MM"
+                  className="w-full border-2 border-slate-200 p-3 pr-14 rounded-xl text-base focus:border-green-500 focus:outline-none"
+                />
+                <div className="absolute right-2.5 top-2.5">
+                  <VoiceSearchButton
+                    size="sm"
+                    buttonTitle="Size bol kar likhein"
+                    onTranscript={spoken => setSize(normalizeVoiceQuery(spoken))}
+                  />
+                </div>
+              </div>
             </div>
 
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">
                 Color (Optional)
               </label>
-              <input
-                type="text"
-                value={color}
-                onChange={e => setColor(e.target.value)}
-                placeholder="e.g. T-1, T-7, Black"
-                className="w-full border-2 border-slate-200 p-3 rounded-xl text-base focus:border-green-500 focus:outline-none"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  value={color}
+                  onChange={e => setColor(e.target.value)}
+                  placeholder="e.g. T-1, T-7, Black"
+                  className="w-full border-2 border-slate-200 p-3 pr-14 rounded-xl text-base focus:border-green-500 focus:outline-none"
+                />
+                <div className="absolute right-2.5 top-2.5">
+                  <VoiceSearchButton
+                    size="sm"
+                    buttonTitle="Color bol kar likhein"
+                    onTranscript={spoken => setColor(normalizeVoiceQuery(spoken))}
+                  />
+                </div>
+              </div>
             </div>
           </div>
 

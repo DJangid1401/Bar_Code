@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { AllowedUnit, normalizeUnit, roundQty } from '../utils/qrHelper';
+import VoiceSearchButton from '../components/VoiceSearchButton';
+import { normalizeVoiceQuery } from '../utils/voiceHelper';
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -11,6 +13,8 @@ import {
   ClipboardList,
   Clock,
   User,
+  Search,
+  X,
 } from 'lucide-react';
 
 type ColorBreakdown = {
@@ -70,6 +74,7 @@ export default function Activity() {
   const { items, logs, currentUser, deleteLog, isLoading, isSyncing } = useStore();
   const isAdmin = currentUser?.role === 'Admin';
   const [filter, setFilter] = useState<ViewFilter>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const totalItems = items.length;
 
@@ -183,17 +188,30 @@ export default function Activity() {
   const hasAnyOut = totalOutPcs > 0 || totalOutKgs > 0 || totalOutPac > 0;
 
   const filteredFlowItems = useMemo(() => {
+    let list = itemFlowList;
     switch (filter) {
       case 'DISPATCHED':
-        return itemFlowList.filter(i => i.computedOut > 0);
+        list = list.filter(i => i.computedOut > 0);
+        break;
       case 'REMAINING':
-        return itemFlowList.filter(i => i.stock > 0);
+        list = list.filter(i => i.stock > 0);
+        break;
       case 'OUT_OF_STOCK':
-        return itemFlowList.filter(i => i.stock <= 0);
-      default:
-        return itemFlowList;
+        list = list.filter(i => i.stock <= 0);
+        break;
     }
-  }, [itemFlowList, filter]);
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        i =>
+          i.name.toLowerCase().includes(q) ||
+          i.barcode.toLowerCase().includes(q) ||
+          (i.size && i.size.toLowerCase().includes(q)) ||
+          (i.color && i.color.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [itemFlowList, filter, searchQuery]);
 
   // Category-Wise & Color-Wise Breakdown
   const categorySummaries = useMemo<CategorySummary[]>(() => {
@@ -372,14 +390,45 @@ export default function Activity() {
 
       {/* Complete Stock Report Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
           <div className="flex items-center gap-2">
             <ClipboardList className="text-indigo-600" size={20} />
             <h2 className="font-bold text-slate-800 text-lg">
               Complete Stock Report (Dispatched &amp; Remaining)
             </h2>
           </div>
-          <div className="flex flex-wrap gap-1.5">
+
+          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+            <div className="relative flex-1 sm:w-64">
+              <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search product, code, size, color..."
+                className="w-full pl-8 pr-16 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-indigo-500"
+              />
+              <div className="absolute right-1 top-0.5 flex items-center">
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                    title="Clear search"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+                <VoiceSearchButton
+                  size="sm"
+                  buttonTitle="Search report by voice"
+                  showLangToggle={true}
+                  onTranscript={spoken => setSearchQuery(normalizeVoiceQuery(spoken))}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
             {(
               [
                 { id: 'ALL', label: `All (${itemFlowList.length})` },
@@ -403,6 +452,7 @@ export default function Activity() {
             ))}
           </div>
         </div>
+      </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[680px]">

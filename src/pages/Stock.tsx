@@ -421,6 +421,7 @@ export default function Stock() {
             <VoiceSearchButton
               size="sm"
               buttonTitle="Voice search table (Bol kar search karein)"
+              showLangToggle={true}
               onListeningStateChange={setIsVoiceListening}
               onTranscript={spoken => {
                 const norm = normalizeVoiceQuery(spoken);

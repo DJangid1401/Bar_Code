@@ -6,6 +6,8 @@ import {
   INDIAN_PHONE_REGEX,
 } from '../store';
 import { Customer } from '../types/customer';
+import VoiceSearchButton from '../components/VoiceSearchButton';
+import { normalizeVoiceQuery } from '../utils/voiceHelper';
 import {
   Contact2,
   Plus,
@@ -317,8 +319,26 @@ export default function Customers() {
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search by Name, GST, Phone, PAN..."
-              className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-blue-500"
+              className="w-full pl-9 pr-20 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-blue-500"
             />
+            <div className="absolute right-1.5 top-1 flex items-center gap-1">
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                  title="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+              <VoiceSearchButton
+                size="sm"
+                buttonTitle="Customer search (Bol kar search karein)"
+                showLangToggle={true}
+                onTranscript={spoken => setSearch(normalizeVoiceQuery(spoken))}
+              />
+            </div>
           </div>
         </div>
 
@@ -441,15 +461,24 @@ export default function Customers() {
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Customer Name <span className="text-red-500">* (Mandatory)</span>
                 </label>
-                <input
-                  type="text"
-                  value={formName}
-                  onChange={e => setFormName(e.target.value)}
-                  placeholder="e.g. Shree Ganesh Traders"
-                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold focus:outline-none focus:border-blue-500"
-                  required
-                  autoFocus
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={formName}
+                    onChange={e => setFormName(e.target.value)}
+                    placeholder="e.g. Shree Ganesh Traders"
+                    className="w-full border border-slate-200 rounded-xl pl-3.5 pr-12 py-2.5 text-sm font-semibold focus:outline-none focus:border-blue-500"
+                    required
+                    autoFocus
+                  />
+                  <div className="absolute right-1.5 top-1.5">
+                    <VoiceSearchButton
+                      size="sm"
+                      buttonTitle="Customer name bol kar likhein"
+                      onTranscript={spoken => setFormName(spoken.trim())}
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* GST Number (Mandatory) */}
@@ -593,13 +622,22 @@ export default function Customers() {
                 <label className="block text-xs font-bold text-slate-600 mb-1">
                   Billing / Delivery Address <span className="text-slate-400 font-normal">(Optional)</span>
                 </label>
-                <textarea
-                  rows={2}
-                  value={formAddress}
-                  onChange={e => setFormAddress(e.target.value)}
-                  placeholder="e.g. Shop 14, Zaveri Bazaar, Mumbai"
-                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"
-                />
+                <div className="relative">
+                  <textarea
+                    rows={2}
+                    value={formAddress}
+                    onChange={e => setFormAddress(e.target.value)}
+                    placeholder="e.g. Shop 14, Zaveri Bazaar, Mumbai"
+                    className="w-full border border-slate-200 rounded-xl pl-3.5 pr-12 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"
+                  />
+                  <div className="absolute right-1.5 top-1.5">
+                    <VoiceSearchButton
+                      size="sm"
+                      buttonTitle="Address bol kar likhein"
+                      onTranscript={spoken => setFormAddress(spoken.trim())}
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">

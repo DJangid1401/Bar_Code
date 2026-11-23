@@ -218,10 +218,10 @@ export default function Out() {
     setIsDropdownOpen(false);
   };
 
-  const handleVoiceTranscript = (spokenText: string) => {
+  const handleVoiceTranscript = (spokenText: string, alternatives?: string[]) => {
     if (!spokenText.trim()) return;
 
-    const result = findBestVoiceMatch(spokenText, items);
+    const result = findBestVoiceMatch(spokenText, items, alternatives);
     const query = result.normalizedQuery || spokenText.trim();
 
     if (result.match) {
@@ -232,15 +232,15 @@ export default function Out() {
         text: `Voice heard: "${spokenText}" → Selected ${result.match.barcode} (${result.match.name}${result.match.size ? ` ${result.match.size}` : ''}${result.match.color ? ` ${formatColorLabel(result.match.color)}` : ''})`,
       });
     } else {
-      // Multiple or partial matches: update search and open dropdown so user sees all choices
+      // Multiple or partial matches: update search and open dropdown so user sees all choices without false auto-select
       setSearchProduct(query);
       setIsDropdownOpen(true);
       setVoiceNotification({
         type: 'info',
         text:
           result.matches.length > 0
-            ? `Voice heard: "${spokenText}" → Found ${result.matches.length} matching products. Select below.`
-            : `Voice heard: "${spokenText}" → Showing matching products.`,
+            ? `Voice heard: "${spokenText}" (${result.matches.length} matching items found. Please select below).`
+            : `Voice heard: "${spokenText}". Showing search results.`,
       });
     }
 
@@ -454,7 +454,18 @@ export default function Out() {
                 <VoiceSearchButton
                   size="sm"
                   buttonTitle="Customer name bol kar likhein"
-                  onTranscript={spoken => setCustomerName(spoken.trim())}
+                  showLangToggle={true}
+                  onTranscript={spoken => {
+                    const clean = spoken.trim();
+                    const cleanLower = clean.toLowerCase();
+                    const matchedCust = customerSuggestions.find(
+                      c =>
+                        c.name.toLowerCase() === cleanLower ||
+                        c.name.toLowerCase().includes(cleanLower) ||
+                        cleanLower.includes(c.name.toLowerCase())
+                    );
+                    setCustomerName(matchedCust ? matchedCust.name : clean);
+                  }}
                 />
               </div>
               <datalist id="customer-name-suggestions">
@@ -503,6 +514,7 @@ export default function Out() {
                 <VoiceSearchButton
                   size="sm"
                   buttonTitle="Voice search: Bol kar product select karein"
+                  showLangToggle={true}
                   onListeningStateChange={setIsVoiceListening}
                   onTranscript={handleVoiceTranscript}
                 />

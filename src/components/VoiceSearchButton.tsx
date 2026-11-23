@@ -3,23 +3,31 @@ import { Mic, MicOff } from 'lucide-react';
 import { isSpeechRecognitionSupported } from '../utils/voiceHelper';
 
 export interface VoiceSearchButtonProps {
-  onTranscript: (transcript: string) => void;
+  onTranscript: (transcript: string, alternatives?: string[]) => void;
   className?: string;
   size?: 'sm' | 'md' | 'lg';
   buttonTitle?: string;
   lang?: string;
+  showLangToggle?: boolean;
   onListeningStateChange?: (isListening: boolean) => void;
 }
 
 // Window typing for Web Speech API
-interface SpeechRecognitionEvent {
-  results: {
-    [index: number]: {
-      [index: number]: {
-        transcript: string;
-      };
-    };
+interface SpeechRecognitionResultAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  [index: number]: {
+    length: number;
+    [altIndex: number]: SpeechRecognitionResultAlternative;
   };
+}
+
+interface SpeechRecognitionEvent {
+  results: SpeechRecognitionResultList;
 }
 
 interface SpeechRecognitionErrorEvent {
@@ -30,6 +38,7 @@ interface SpeechRecognitionErrorEvent {
 interface SpeechRecognitionInstance {
   continuous: boolean;
   interimResults: boolean;
+  maxAlternatives: number;
   lang: string;
   start: () => void;
   stop: () => void;
@@ -51,17 +60,43 @@ function getSpeechRecognitionClass(): SpeechRecognitionConstructor | null {
   return w.SpeechRecognition || w.webkitSpeechRecognition || null;
 }
 
+const VOICE_LANG_STORAGE_KEY = 'swati_voice_search_lang';
+
+export function getSavedVoiceLang(): string {
+  try {
+    return localStorage.getItem(VOICE_LANG_STORAGE_KEY) || 'en-IN';
+  } catch {
+    return 'en-IN';
+  }
+}
+
+export function setSavedVoiceLang(l: string): void {
+  try {
+    localStorage.setItem(VOICE_LANG_STORAGE_KEY, l);
+  } catch {
+    // ignore
+  }
+}
+
 export default function VoiceSearchButton({
   onTranscript,
   className = '',
   size = 'md',
   buttonTitle = 'Voice Search (Bol kar search karein)',
-  lang = 'en-IN',
+  lang,
+  showLangToggle = false,
   onListeningStateChange,
 }: VoiceSearchButtonProps) {
   const [isListening, setIsListening] = useState(false);
+  const [currentLang, setCurrentLang] = useState<string>(() => lang || getSavedVoiceLang());
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const isSupported = isSpeechRecognitionSupported();
+
+  useEffect(() => {
+    if (lang) {
+      setCurrentLang(lang);
+    }
+  }, [lang]);
 
   // Notify parent component about listening state
   useEffect(() => {
@@ -115,16 +150,28 @@ export default function VoiceSearchButton({
       const recognition = new SpeechClass();
       recognition.continuous = false;
       recognition.interimResults = false;
-      recognition.lang = lang;
+      recognition.maxAlternatives = 5; // Get up to 5 alternative candidate transcripts
+      recognition.lang = currentLang;
 
       recognition.onstart = () => {
         setIsListening(true);
       };
 
       recognition.onresult = (event: SpeechRecognitionEvent) => {
-        const spoken = event.results?.[0]?.[0]?.transcript || '';
-        if (spoken.trim()) {
-          onTranscript(spoken.trim());
+        const alternatives: string[] = [];
+        const firstResult = event.results?.[0];
+        if (firstResult) {
+          for (let i = 0; i < firstResult.length; i++) {
+            const item = firstResult[i];
+            if (item && item.transcript) {
+              alternatives.push(item.transcript.trim());
+            }
+          }
+        }
+
+        const primarySpoken = alternatives[0] || '';
+        if (primarySpoken) {
+          onTranscript(primarySpoken, alternatives);
         }
         setIsListening(false);
       };
@@ -150,7 +197,7 @@ export default function VoiceSearchButton({
       console.error('Failed to initialize speech recognition:', err);
       setIsListening(false);
     }
-  }, [lang, onTranscript]);
+  }, [currentLang, onTranscript]);
 
   const handleToggle = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -160,6 +207,14 @@ export default function VoiceSearchButton({
     } else {
       startListening();
     }
+  };
+
+  const handleToggleLang = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const nextLang = currentLang === 'en-IN' ? 'hi-IN' : 'en-IN';
+    setCurrentLang(nextLang);
+    setSavedVoiceLang(nextLang);
   };
 
   const iconSizes = {
@@ -174,41 +229,61 @@ export default function VoiceSearchButton({
     lg: 'p-2.5',
   };
 
+  if (!isSupported) {
+    return (
+      <div
+        className={`inline-flex items-center text-slate-300 opacity-60 cursor-not-allowed ${className}`}
+        title="Voice search is not supported in this browser (use Chrome or Edge)"
+      >
+        <MicOff size={iconSizes[size]} />
+      </div>
+    );
+  }
+
+  const isHindi = currentLang.startsWith('hi');
+
   return (
-    <button
-      type="button"
-      onClick={handleToggle}
-      title={
-        isListening
-          ? 'Listening... Click to stop (Bol sakte hain...)'
-          : !isSupported
-          ? 'Voice search not supported in this browser'
-          : buttonTitle
-      }
-      aria-label={buttonTitle}
-      className={`relative inline-flex items-center justify-center rounded-xl transition-all cursor-pointer ${
-        buttonPaddings[size]
-      } ${
-        isListening
-          ? 'bg-red-600 text-white shadow-md shadow-red-200 scale-105'
-          : 'bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 border border-slate-200'
-      } ${className}`}
-    >
-      {/* Animated ripple effect when listening */}
-      {isListening && (
-        <>
-          <span className="absolute -inset-1 rounded-xl bg-red-500 opacity-40 animate-ping" />
-          <span className="absolute -inset-0.5 rounded-xl bg-red-400 opacity-30 animate-pulse" />
-        </>
+    <div className={`inline-flex items-center gap-1 ${className}`}>
+      {showLangToggle && (
+        <button
+          type="button"
+          onClick={handleToggleLang}
+          className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
+          title={`Click to switch speech language (Current: ${isHindi ? 'Hindi' : 'English'})`}
+        >
+          {isHindi ? 'HI' : 'EN'}
+        </button>
       )}
 
-      {isListening ? (
-        <Mic size={iconSizes[size]} className="relative z-10 animate-pulse" />
-      ) : isSupported ? (
-        <Mic size={iconSizes[size]} className="relative z-10" />
-      ) : (
-        <MicOff size={iconSizes[size]} className="relative z-10 text-slate-400" />
-      )}
-    </button>
+      <button
+        type="button"
+        onClick={handleToggle}
+        title={
+          isListening
+            ? 'Listening... Click to stop (Sun rahe hain...)'
+            : `${buttonTitle} [${isHindi ? 'Hindi' : 'English'}]`
+        }
+        aria-label={buttonTitle}
+        className={`relative inline-flex items-center justify-center rounded-xl transition-all duration-200 cursor-pointer ${
+          buttonPaddings[size]
+        } ${
+          isListening
+            ? 'bg-red-500 text-white shadow-lg ring-4 ring-red-200 animate-pulse scale-105'
+            : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
+        }`}
+      >
+        {isListening ? (
+          <>
+            <span className="absolute -top-1 -right-1 flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
+            </span>
+            <Mic size={iconSizes[size]} className="animate-bounce" />
+          </>
+        ) : (
+          <Mic size={iconSizes[size]} />
+        )}
+      </button>
+    </div>
   );
 }
